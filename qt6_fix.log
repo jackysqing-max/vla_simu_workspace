@@ -1,0 +1,28 @@
+
+WARNING: apt does not have a stable CLI interface. Use with caution in scripts.
+
+Hit:1 http://de.archive.ubuntu.com/ubuntu jammy InRelease
+Hit:2 https://packages.microsoft.com/repos/code stable InRelease
+Hit:3 http://packages.ros.org/ros2/ubuntu jammy InRelease
+Hit:4 http://security.ubuntu.com/ubuntu jammy-security InRelease
+Hit:5 http://de.archive.ubuntu.com/ubuntu jammy-updates InRelease
+Hit:6 http://de.archive.ubuntu.com/ubuntu jammy-backports InRelease
+Reading package lists...
+Building dependency tree...
+Reading state information...
+All packages are up to date.
+
+WARNING: apt does not have a stable CLI interface. Use with caution in scripts.
+
+Reading package lists...
+Building dependency tree...
+Reading state information...
+libqt6charts6-dev is already the newest version (6.2.4-1).
+qt6-base-dev is already the newest version (6.2.4+dfsg-2ubuntu1.1).
+qt6-base-dev-tools is already the newest version (6.2.4+dfsg-2ubuntu1.1).
+0 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.
+Starting >>> robot_monitor
+Finished <<< robot_monitor [6.48s]
+
+Summary: 1 package finished [6.59s]
+[OK] robot_monitor rebuilt with system Qt6.

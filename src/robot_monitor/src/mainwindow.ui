@@ -1,0 +1,219 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>800</width>
+    <height>600</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Robot Monitor</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QGridLayout" name="gridLayout">
+    <property name="leftMargin">
+     <number>1</number>
+    </property>
+    <property name="topMargin">
+     <number>1</number>
+    </property>
+    <property name="rightMargin">
+     <number>1</number>
+    </property>
+    <property name="bottomMargin">
+     <number>1</number>
+    </property>
+    <property name="spacing">
+     <number>1</number>
+    </property>
+   </layout>
+  </widget>
+  <widget class="QMenuBar" name="menubar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>1119</width>
+     <height>24</height>
+    </rect>
+   </property>
+   <widget class="QMenu" name="menuDisplay">
+    <property name="title">
+     <string>Display</string>
+    </property>
+    <addaction name="actionAuto_Scaling"/>
+    <addaction name="actionClear"/>
+    <addaction name="actionJoint_1"/>
+    <addaction name="actionJoint_2"/>
+    <addaction name="actionJoint_3"/>
+    <addaction name="actionJoint_4"/>
+    <addaction name="actionJoint_5"/>
+    <addaction name="actionJoint_6"/>
+    <addaction name="actionJoint_7"/>
+   </widget>
+   <widget class="QMenu" name="menuSetting">
+    <property name="title">
+     <string>Setting</string>
+    </property>
+    <addaction name="actionWindow_Width"/>
+    <addaction name="actionLine_Width"/>
+    <addaction name="actionZoom_In"/>
+    <addaction name="actionZoom_Out"/>
+    <addaction name="actionZoom_Reset"/>
+    <addaction name="actionLoging"/>
+   </widget>
+   <widget class="QMenu" name="menuCommand">
+    <property name="title">
+     <string>Command</string>
+    </property>
+    <addaction name="actionSave_Data"/>
+   </widget>
+   <addaction name="menuDisplay"/>
+   <addaction name="menuSetting"/>
+   <addaction name="menuCommand"/>
+  </widget>
+  <widget class="QStatusBar" name="statusbar"/>
+  <action name="actionClear">
+   <property name="text">
+    <string>Clear</string>
+   </property>
+  </action>
+  <action name="actionJoint_1">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="checked">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>Joint 1</string>
+   </property>
+  </action>
+  <action name="actionJoint_2">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="checked">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>Joint 2</string>
+   </property>
+  </action>
+  <action name="actionJoint_3">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="checked">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>Joint 3</string>
+   </property>
+  </action>
+  <action name="actionJoint_4">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="checked">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>Joint 4</string>
+   </property>
+  </action>
+  <action name="actionJoint_5">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="checked">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>Joint 5</string>
+   </property>
+  </action>
+  <action name="actionJoint_6">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="checked">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>Jiont 6</string>
+   </property>
+  </action>
+  <action name="actionJoint_7">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="checked">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>Joint 7</string>
+   </property>
+  </action>
+  <action name="actionAuto_Scaling">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="checked">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>Auto Scaling</string>
+   </property>
+  </action>
+  <action name="actionWindow_Width">
+   <property name="text">
+    <string>Window Width</string>
+   </property>
+  </action>
+  <action name="actionZoom_In">
+   <property name="text">
+    <string>Zoom In</string>
+   </property>
+  </action>
+  <action name="actionZoom_Out">
+   <property name="text">
+    <string>Zoom Out</string>
+   </property>
+  </action>
+  <action name="actionZoom_Reset">
+   <property name="text">
+    <string>Zoom Reset</string>
+   </property>
+  </action>
+  <action name="actionLoging">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>Logging</string>
+   </property>
+  </action>
+  <action name="actionSave_Data">
+   <property name="text">
+    <string>Save Data</string>
+   </property>
+  </action>
+  <action name="actionLine_Width">
+   <property name="text">
+    <string>Line Width</string>
+   </property>
+  </action>
+  <action name="actionService">
+   <property name="text">
+    <string>Stop Service</string>
+   </property>
+  </action>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

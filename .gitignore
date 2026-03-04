@@ -1,0 +1,31 @@
+# ===== ROS2 / colcon =====
+build/
+install/
+log/
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+*.egg-info/
+dist/
+build_python/
+
+# ===== IDE =====
+.vscode/
+
+# ===== OS =====
+.DS_Store
+
+# ===== Artifacts / Outputs =====
+artifacts/
+outputs/
+*.mp4
+*.avi
+
+# ===== Large weights (do NOT commit) =====
+*.pth
+*.pt
+*.ckpt
