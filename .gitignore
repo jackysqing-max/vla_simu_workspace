@@ -1,31 +1,53 @@
-# ===== ROS2 / colcon =====
+# ===== ROS2 / colcon workspace =====
 build/
 install/
 log/
+.colcon/
+*.log
 
 # ===== Python =====
 __pycache__/
 *.py[cod]
-.venv/
-venv/
-.env
+*.so
 *.egg-info/
 dist/
-build_python/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+.venv/
+venv/
+env/
+.env
 
 # ===== IDE =====
 .vscode/
+.idea/
 
 # ===== OS =====
 .DS_Store
+Thumbs.db
 
-# ===== Artifacts / Outputs =====
+# ===== Large files: weights / datasets / outputs =====
+data/
+datasets/
+weights/
+checkpoints/
 artifacts/
 outputs/
-*.mp4
-*.avi
-
-# ===== Large weights (do NOT commit) =====
+runs/
 *.pth
 *.pt
 *.ckpt
+*.onnx
+*.engine
+*.mp4
+*.avi
+*.mov
+*.mkv
+
+# ===== ROS bags =====
+*.bag
+*.bag.active
+*.db3
+rosbag2_*/
