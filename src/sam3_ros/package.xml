@@ -5,7 +5,7 @@
   <version>0.0.0</version>
   <description>SAM3-based image segmentation nodes for ROS 2</description>
   <maintainer email="siqin@todo.todo">siqin</maintainer>
-  <license>TODO: License declaration</license>
+  <license>Apache-2.0</license>
 
   <depend>rclpy</depend>
   <depend>sensor_msgs</depend>

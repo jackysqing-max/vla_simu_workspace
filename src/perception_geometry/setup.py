@@ -16,7 +16,7 @@ setup(
     maintainer='siqin',
     maintainer_email='siqin@todo.todo',
     description='Mask + depth fusion for 3D keypoint extraction',
-    license='TODO: License declaration',
+    license='Apache-2.0',
     extras_require={
         'test': ['pytest'],
     },

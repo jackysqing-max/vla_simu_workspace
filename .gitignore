@@ -6,6 +6,8 @@ log/
 *.log
 run_logs/
 run_pids/
+.run/
+run/
 log.txt
 
 # ===== Python =====

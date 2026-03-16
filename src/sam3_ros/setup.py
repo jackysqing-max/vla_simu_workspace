@@ -16,7 +16,7 @@ setup(
     maintainer='siqin',
     maintainer_email='jackysqing@gmail.com',
     description='Prompt-driven SAM3 segmentation for ROS 2 image topics',
-    license='TODO: License declaration',
+    license='Apache-2.0',
     extras_require={
         'test': [
             'pytest',

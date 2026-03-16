@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ===================== Config =====================
-WS="${HOME}/ros2_workspaces/humble/ros2_pybullet_ws"
+WS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROS_SETUP="/opt/ros/humble/setup.bash"
 WS_SETUP="${WS}/install/setup.bash"
 
@@ -247,4 +247,3 @@ case "${cmd}" in
     exit 1
     ;;
 esac
-

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-WS="$HOME/ros2_workspaces/humble/ros2_pybullet_ws"
+WS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="$WS/run_logs"
 PID_DIR="$WS/run_pids"
 mkdir -p "$LOG_DIR" "$PID_DIR"

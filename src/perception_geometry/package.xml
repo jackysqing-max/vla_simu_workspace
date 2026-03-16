@@ -5,7 +5,7 @@
   <version>0.0.0</version>
   <description>Fuse segmentation masks and depth images into 3D keypoints</description>
   <maintainer email="jackysqing@gmail.com">siqin</maintainer>
-  <license>TODO: License declaration</license>
+  <license>Apache-2.0</license>
 
   <depend>rclpy</depend>
   <depend>sensor_msgs</depend>
