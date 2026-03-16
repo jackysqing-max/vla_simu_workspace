@@ -1,0 +1,113 @@
+digraph workspace_architecture {
+  graph [
+    rankdir=LR,
+    bgcolor="white",
+    fontname="Helvetica",
+    fontsize=18,
+    label="ROS 2 Main-Chain Architecture",
+    labelloc="t",
+    ranksep=1.0,
+    nodesep=0.45,
+    pad=0.3
+  ];
+
+  node [fontname="Helvetica", fontsize=11, margin="0.12,0.08"];
+  edge [fontname="Helvetica", fontsize=10, color="#4b5563", arrowsize=0.8];
+
+  subgraph cluster_control {
+    label="Motion Control And Monitoring";
+    color="#cbd5e1";
+    style="rounded";
+
+    sim [shape=box, style="rounded,filled", fillcolor="#dbeafe", color="#60a5fa", label="iiwa_pybullet_sim_node"];
+    line [shape=box, style="rounded,filled", fillcolor="#ede9fe", color="#a78bfa", label="iiwa_line_ik_desired"];
+    imp [shape=box, style="rounded,filled", fillcolor="#fee2e2", color="#f87171", label="iiwa_impedance_controller"];
+    bridge [shape=box, style="rounded,filled", fillcolor="#dcfce7", color="#34d399", label="robotstate_bridge"];
+    monitor [shape=box, style="rounded,filled", fillcolor="#dcfce7", color="#16a34a", label="robot_monitor"];
+    mode_src [shape=box, style="rounded,dashed", color="#94a3b8", label="CLI / external mode control"];
+
+    t_init [shape=ellipse, style=filled, fillcolor="#f8fafc", color="#94a3b8", label="/iiwa7/init_done"];
+    t_js [shape=ellipse, style=filled, fillcolor="#f8fafc", color="#94a3b8", label="/iiwa7/joint_states"];
+    t_qdes [shape=ellipse, style=filled, fillcolor="#f8fafc", color="#94a3b8", label="/iiwa7/joint_desired"];
+    t_tau [shape=ellipse, style=filled, fillcolor="#f8fafc", color="#94a3b8", label="/iiwa7/joint_torques"];
+    t_mode [shape=ellipse, style=filled, fillcolor="#f8fafc", color="#94a3b8", label="/iiwa7/control_mode"];
+    t_robot_states [shape=ellipse, style=filled, fillcolor="#f8fafc", color="#94a3b8", label="robot_states"];
+
+    sim -> t_init;
+    sim -> t_js;
+
+    t_init -> line;
+    t_js -> line;
+    line -> t_qdes;
+
+    t_js -> imp;
+    t_qdes -> imp;
+    imp -> t_tau;
+
+    mode_src -> t_mode;
+    t_mode -> sim;
+    t_qdes -> sim;
+    t_tau -> sim;
+
+    t_js -> bridge;
+    t_qdes -> bridge;
+    t_tau -> bridge;
+    bridge -> t_robot_states;
+    t_robot_states -> monitor;
+  }
+
+  subgraph cluster_perception {
+    label="RGB-D Perception Loop";
+    color="#cbd5e1";
+    style="rounded";
+
+    rgbd [shape=box, style="rounded,filled", fillcolor="#dbeafe", color="#60a5fa", label="iiwa_pybullet_rgbd_sim_node"];
+    sam3_mask [shape=box, style="rounded,filled", fillcolor="#ede9fe", color="#a78bfa", label="sam3_mask_node"];
+    fusion [shape=box, style="rounded,filled", fillcolor="#fef3c7", color="#f59e0b", label="mask_depth_fusion_node"];
+    tracker [shape=box, style="rounded,filled", fillcolor="#fee2e2", color="#f87171", label="iiwa_keypoint_tracker_node"];
+    consumers [shape=box, style="rounded,dashed", color="#94a3b8", label="RViz / downstream consumers"];
+
+    t_color [shape=ellipse, style=filled, fillcolor="#f8fafc", color="#94a3b8", label="/sim/camera/color/image_raw"];
+    t_depth [shape=ellipse, style=filled, fillcolor="#f8fafc", color="#94a3b8", label="/sim/camera/aligned_depth_to_color/image_raw"];
+    t_info [shape=ellipse, style=filled, fillcolor="#f8fafc", color="#94a3b8", label="/sim/camera/color/camera_info"];
+    t_points [shape=ellipse, style=filled, fillcolor="#f8fafc", color="#94a3b8", label="/sim/camera/depth/color/points"];
+    t_mask [shape=ellipse, style=filled, fillcolor="#f8fafc", color="#94a3b8", label="/sam3/mask"];
+    t_score [shape=ellipse, style=filled, fillcolor="#f8fafc", color="#94a3b8", label="/sam3/score"];
+    t_keypoint3d [shape=ellipse, style=filled, fillcolor="#f8fafc", color="#94a3b8", label="/perception/keypoint_3d"];
+    t_valid [shape=ellipse, style=filled, fillcolor="#f8fafc", color="#94a3b8", label="/perception/valid"];
+    t_overlay [shape=ellipse, style=filled, fillcolor="#f8fafc", color="#94a3b8", label="/perception/keypoint_overlay"];
+
+    rgbd -> t_init;
+    rgbd -> t_js;
+    rgbd -> t_color;
+    rgbd -> t_depth;
+    rgbd -> t_info;
+    rgbd -> t_points;
+
+    t_color -> sam3_mask;
+    sam3_mask -> t_mask;
+    sam3_mask -> t_score;
+
+    t_mask -> fusion;
+    t_depth -> fusion;
+    t_info -> fusion;
+    t_color -> fusion;
+    t_score -> fusion;
+
+    fusion -> t_keypoint3d;
+    fusion -> t_valid;
+    fusion -> t_overlay;
+    fusion -> consumers;
+    t_points -> consumers;
+
+    t_keypoint3d -> tracker;
+    t_valid -> tracker;
+    t_js -> tracker;
+    tracker -> t_qdes;
+    tracker -> t_mode;
+  }
+
+  note_exec [shape=note, color="#94a3b8", fontcolor="#334155", label="Run either iiwa_pybullet_sim_node\nor iiwa_pybullet_rgbd_sim_node\nas the active execution backend."];
+  note_exec -> sim [arrowhead=none, style=dashed, color="#94a3b8"];
+  note_exec -> rgbd [arrowhead=none, style=dashed, color="#94a3b8"];
+}

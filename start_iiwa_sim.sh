@@ -7,7 +7,7 @@ WS="${HOME}/ros2_pybullet_ws"
 SIM_PKG="pybullet_ros2_sim"
 SIM_EXEC="iiwa_pybullet_sim_node"
 DES_PKG="pybullet_ros2_sim"
-DES_EXEC="iiwa_circle_ik_desired"
+DES_EXEC="iiwa_line_ik_desired"
 CTRL_PKG="pybullet_ros2_sim"
 CTRL_EXEC="iiwa_impedance_controller"
 

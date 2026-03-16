@@ -17,7 +17,6 @@ set -u 2>/dev/null || true
 ros2 run pybullet_ros2_sim iiwa_pybullet_sim_node \
   >"$LOG_DIR/sim.log" 2>&1 &  echo $! >"$PID_DIR/sim.pid"
 
-#ros2 run pybullet_ros2_sim iiwa_circle_ik_desired \
 ros2 run pybullet_ros2_sim iiwa_line_ik_desired \
   >"$LOG_DIR/desired.log" 2>&1 &  echo $! >"$PID_DIR/desired.pid"
 
@@ -36,4 +35,3 @@ echo "PIDs:   $PID_DIR"
 
 # 前台等待，Ctrl+C 时一并退出
 wait
-

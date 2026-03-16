@@ -4,6 +4,9 @@ install/
 log/
 .colcon/
 *.log
+run_logs/
+run_pids/
+log.txt
 
 # ===== Python =====
 __pycache__/
@@ -36,6 +39,8 @@ checkpoints/
 artifacts/
 outputs/
 runs/
+docs/generated/
+src.zip
 *.pth
 *.pt
 *.ckpt

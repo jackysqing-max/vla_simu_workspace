@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'sam3_ros'
+package_name = 'perception_geometry'
 
 setup(
     name=package_name,
@@ -14,17 +14,15 @@ setup(
     install_requires=['setuptools'],
     zip_safe=True,
     maintainer='siqin',
-    maintainer_email='jackysqing@gmail.com',
-    description='Prompt-driven SAM3 segmentation for ROS 2 image topics',
+    maintainer_email='siqin@todo.todo',
+    description='Mask + depth fusion for 3D keypoint extraction',
     license='TODO: License declaration',
     extras_require={
-        'test': [
-            'pytest',
-        ],
+        'test': ['pytest'],
     },
     entry_points={
         'console_scripts': [
-            'sam3_mask_node = sam3_ros.sam3_mask_node:main',
+            'mask_depth_fusion_node = perception_geometry.mask_depth_fusion_node:main',
         ],
     },
 )

@@ -17,7 +17,7 @@ class Widget : public QWidget
     Q_OBJECT
 
 public:
-    explicit Widget(QString & t, QWidget *parent = nullptr);
+    explicit Widget(const QString & t, QWidget *parent = nullptr);
     ~Widget();
      QLineSeries ** getSeries();
      QValueAxis *getXAxis();
