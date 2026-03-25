@@ -2,9 +2,7 @@
 
 This repository contains a ROS 2 Humble workspace for KUKA iiwa simulation in PyBullet, joint-space motion control, robot-state monitoring, RGB-D camera simulation, and a perception loop that turns segmented image regions into 3D targets.
 
-Current archived patch release: `v0.1.1`
-
-Current feature branch in progress: `feature/llm-task-execution`
+Current archived patch release: `v0.1.2`
 
 The maintained path in this branch is the main chain:
 
@@ -102,7 +100,7 @@ Recommended one-command launcher for the current tabletop demo:
 ./start_rekep_demo.sh start
 ```
 
-Recommended one-command launcher for the LLM task-decomposition branch:
+Recommended one-command launcher for the LLM task-decomposition demo:
 
 ```bash
 OPENAI_API_KEY=... ./start_llm_rekep_demo.sh start
@@ -143,7 +141,7 @@ python -m sam3_ros.sam3_mask_node --ros-args \
   -p device:="cuda"
 ```
 
-In the LLM branch, `sam3_mask_node` also listens on `/sam3/prompt`, so the
+In this release, `sam3_mask_node` also listens on `/sam3/prompt`, so the
 executor can switch target objects at runtime without restarting the node.
 
 To send a natural-language task:
