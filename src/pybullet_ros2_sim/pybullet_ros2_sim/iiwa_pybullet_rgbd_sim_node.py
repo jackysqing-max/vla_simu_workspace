@@ -3,7 +3,6 @@
 
 import threading
 import time
-from typing import List
 
 import pybullet as p
 import pybullet_data
@@ -64,11 +63,18 @@ class IiwaPybulletRGBDSim(Node):
         self.declare_parameter("cam_near", 0.02)
         self.declare_parameter("cam_far", 3.0)
 
-        self.declare_parameter("cam_target", [0.6, 0.0, 0.05])
+        self.declare_parameter("cam_target", [0.72, 0.0, 0.28])
         self.declare_parameter("cam_distance", 1.0)
         self.declare_parameter("cam_yaw_deg", 90.0)
         self.declare_parameter("cam_pitch_deg", -45.0)
         self.declare_parameter("cam_roll_deg", 0.0)
+
+        self.declare_parameter("table_center_xy", [0.72, 0.0])
+        self.declare_parameter("table_size_xyz", [0.72, 0.52, 0.04])
+        self.declare_parameter("table_surface_z", 0.34)
+        self.declare_parameter("table_leg_width", 0.05)
+        self.declare_parameter("cube_size", 0.05)
+        self.declare_parameter("cube_mass", 0.08)
 
         self.gui = bool(self.get_parameter("gui").value)
         self.sim_hz = float(self.get_parameter("sim_hz").value)
@@ -79,6 +85,15 @@ class IiwaPybulletRGBDSim(Node):
         self.position_force = float(self.get_parameter("position_force").value)
         self.tau_limit = float(self.get_parameter("tau_limit").value)
         self.init_q = [float(value) for value in self.get_parameter("init_q").value]
+
+        table_center_xy = [float(value) for value in self.get_parameter("table_center_xy").value]
+        table_size_xyz = [float(value) for value in self.get_parameter("table_size_xyz").value]
+        self.table_center_xy = table_center_xy[:2]
+        self.table_size_xyz = table_size_xyz[:3]
+        self.table_surface_z = float(self.get_parameter("table_surface_z").value)
+        self.table_leg_width = float(self.get_parameter("table_leg_width").value)
+        self.cube_size = float(self.get_parameter("cube_size").value)
+        self.cube_mass = float(self.get_parameter("cube_mass").value)
 
         self.cam_cfg = SimCameraConfig(
             width=int(self.get_parameter("cam_width").value),
@@ -140,6 +155,8 @@ class IiwaPybulletRGBDSim(Node):
         p.setTimeStep(1.0 / max(self.sim_hz, 1e-6), physicsClientId=self.client)
         p.setRealTimeSimulation(0, physicsClientId=self.client)
 
+        self.table_body_ids = []
+        self.object_ids = []
         self._load_scene()
         self.camera = SimRGBDCamera(self.client, self.cam_cfg)
 
@@ -196,14 +213,102 @@ class IiwaPybulletRGBDSim(Node):
         self._send_init_done_once()
         self.get_logger().info("iiwa_pybullet_rgbd_sim_node started")
 
-    def _load_scene(self):
-        p.loadURDF("plane.urdf", physicsClientId=self.client)
-        p.loadURDF(
-            "table/table.urdf",
-            basePosition=[0.6, 0.0, -0.65],
-            useFixedBase=True,
+    def _create_box_body(self, half_extents, rgba, base_position, mass=0.0):
+        """Create a simple box rigid body with explicit visual + collision shape."""
+        collision_shape = p.createCollisionShape(
+            p.GEOM_BOX,
+            halfExtents=half_extents,
             physicsClientId=self.client,
         )
+        visual_shape = p.createVisualShape(
+            p.GEOM_BOX,
+            halfExtents=half_extents,
+            rgbaColor=rgba,
+            physicsClientId=self.client,
+        )
+        body_id = p.createMultiBody(
+            baseMass=mass,
+            baseCollisionShapeIndex=collision_shape,
+            baseVisualShapeIndex=visual_shape,
+            basePosition=base_position,
+            physicsClientId=self.client,
+        )
+        p.changeDynamics(
+            body_id,
+            -1,
+            lateralFriction=1.0,
+            spinningFriction=0.01,
+            rollingFriction=0.001,
+            restitution=0.0,
+            physicsClientId=self.client,
+        )
+        return body_id
+
+    def _spawn_table(self):
+        """Build a visible table above the plane instead of burying a URDF base."""
+        table_x, table_y = self.table_center_xy
+        size_x, size_y, thickness = self.table_size_xyz
+        half_extents = [0.5 * size_x, 0.5 * size_y, 0.5 * thickness]
+
+        top_center_z = self.table_surface_z - 0.5 * thickness
+        top_id = self._create_box_body(
+            half_extents=half_extents,
+            rgba=[0.58, 0.42, 0.26, 1.0],
+            base_position=[table_x, table_y, top_center_z],
+            mass=0.0,
+        )
+        self.table_body_ids.append(top_id)
+
+        top_bottom_z = top_center_z - 0.5 * thickness
+        leg_height = max(top_bottom_z, 0.08)
+        leg_half_height = 0.5 * leg_height
+        leg_half_width = 0.5 * self.table_leg_width
+        leg_inset_x = max(0.08, 0.5 * size_x - self.table_leg_width)
+        leg_inset_y = max(0.08, 0.5 * size_y - self.table_leg_width)
+
+        for sign_x in (-1.0, 1.0):
+            for sign_y in (-1.0, 1.0):
+                leg_id = self._create_box_body(
+                    half_extents=[leg_half_width, leg_half_width, leg_half_height],
+                    rgba=[0.35, 0.24, 0.16, 1.0],
+                    base_position=[
+                        table_x + sign_x * leg_inset_x,
+                        table_y + sign_y * leg_inset_y,
+                        leg_half_height,
+                    ],
+                    mass=0.0,
+                )
+                self.table_body_ids.append(leg_id)
+
+    def _spawn_demo_cubes(self):
+        """Spawn several colored cubes on the table so prompt-based selection is meaningful."""
+        cube_half = 0.5 * self.cube_size
+        table_x, table_y = self.table_center_xy
+        cube_z = self.table_surface_z + cube_half + 0.002
+
+        cube_specs = [
+            {"name": "red cube", "offset": (-0.14, -0.10), "rgba": [0.92, 0.18, 0.18, 1.0]},
+            {"name": "green cube", "offset": (0.12, -0.02), "rgba": [0.18, 0.72, 0.28, 1.0]},
+            {"name": "blue cube", "offset": (-0.03, 0.11), "rgba": [0.18, 0.36, 0.92, 1.0]},
+            {"name": "yellow cube", "offset": (0.16, 0.13), "rgba": [0.92, 0.78, 0.12, 1.0]},
+        ]
+
+        for cube_spec in cube_specs:
+            cube_id = self._create_box_body(
+                half_extents=[cube_half, cube_half, cube_half],
+                rgba=cube_spec["rgba"],
+                base_position=[
+                    table_x + cube_spec["offset"][0],
+                    table_y + cube_spec["offset"][1],
+                    cube_z,
+                ],
+                mass=self.cube_mass,
+            )
+            self.object_ids.append(cube_id)
+
+    def _load_scene(self):
+        p.loadURDF("plane.urdf", physicsClientId=self.client)
+        self._spawn_table()
 
         self.robot_id = p.loadURDF(
             "kuka_iiwa/model.urdf",
@@ -212,18 +317,7 @@ class IiwaPybulletRGBDSim(Node):
             physicsClientId=self.client,
         )
 
-        self.obj_id = p.loadURDF(
-            "cube_small.urdf",
-            basePosition=[0.65, 0.0, 0.02],
-            useFixedBase=False,
-            physicsClientId=self.client,
-        )
-        p.changeVisualShape(
-            self.obj_id,
-            -1,
-            rgbaColor=[1.0, 0.0, 0.0, 1.0],
-            physicsClientId=self.client,
-        )
+        self._spawn_demo_cubes()
 
     def on_mode(self, msg: Int8):
         mode = int(msg.data)

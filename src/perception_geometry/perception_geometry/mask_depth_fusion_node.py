@@ -15,10 +15,11 @@ from geometry_msgs.msg import PointStamped
 
 from perception_geometry.pointcloud_ops import (
     intrinsics_from_camera_info,
-    mask_centroid,
     masked_depth_to_xyz,
-    masked_valid_depth_values,
-    pixel_to_xyz,
+    masked_rgbd_to_xyzrgbuv,
+    rekep_rgbd_candidates,
+    select_primary_candidate,
+    xyz_to_pixel,
 )
 from perception_geometry.ros_msg_utils import (
     make_bool_msg,
@@ -57,7 +58,14 @@ def rgb8_to_imgmsg(rgb: np.ndarray, header) -> Image:
     return msg
 
 
-def draw_overlay(rgb: np.ndarray, u: float = None, v: float = None, lines=None, valid: bool = True):
+def draw_overlay(
+    rgb: np.ndarray,
+    u: float = None,
+    v: float = None,
+    candidate_pixels=None,
+    lines=None,
+    valid: bool = True,
+):
     """Draw the current perception result on top of the source RGB frame."""
     image = PILImage.fromarray(rgb.copy())
     draw = ImageDraw.Draw(image)
@@ -66,6 +74,18 @@ def draw_overlay(rgb: np.ndarray, u: float = None, v: float = None, lines=None, 
 
     if not valid:
         draw.rectangle((0, 0, width - 1, height - 1), outline=(255, 0, 0), width=4)
+
+    if candidate_pixels:
+        for candidate_index, pixel in enumerate(candidate_pixels):
+            cu = int(round(pixel[0]))
+            cv = int(round(pixel[1]))
+            radius = 5
+            draw.ellipse(
+                (cu - radius, cv - radius, cu + radius, cv + radius),
+                outline=(0, 255, 0),
+                width=2,
+            )
+            draw.text((cu + 8, cv - 8), str(candidate_index), fill=(0, 255, 0), font=font)
 
     if u is not None and v is not None:
         cx = int(round(u))
@@ -118,6 +138,13 @@ class MaskDepthFusionNode(Node):
         self.declare_parameter("overlay_topic", "/perception/keypoint_overlay")
         self.declare_parameter("min_score", 0.0)
         self.declare_parameter("max_frame_age_sec", 0.2)
+        self.declare_parameter("cluster_count", 6)
+        self.declare_parameter("cluster_max_samples", 2048)
+        self.declare_parameter("cluster_pca_dim", 3)
+        self.declare_parameter("cluster_meanshift_bandwidth_m", 0.06)
+        self.declare_parameter("cluster_xyz_weight", 1.0)
+        self.declare_parameter("cluster_rgb_weight", 0.35)
+        self.declare_parameter("cluster_seed", 0)
 
         self.mask_topic = self.get_parameter("mask_topic").value
         self.color_topic = self.get_parameter("color_topic").value
@@ -127,6 +154,15 @@ class MaskDepthFusionNode(Node):
         self.overlay_topic = self.get_parameter("overlay_topic").value
         self.min_score = float(self.get_parameter("min_score").value)
         self.max_frame_age_sec = float(self.get_parameter("max_frame_age_sec").value)
+        self.cluster_count = int(self.get_parameter("cluster_count").value)
+        self.cluster_max_samples = int(self.get_parameter("cluster_max_samples").value)
+        self.cluster_pca_dim = int(self.get_parameter("cluster_pca_dim").value)
+        self.cluster_meanshift_bandwidth_m = float(
+            self.get_parameter("cluster_meanshift_bandwidth_m").value
+        )
+        self.cluster_xyz_weight = float(self.get_parameter("cluster_xyz_weight").value)
+        self.cluster_rgb_weight = float(self.get_parameter("cluster_rgb_weight").value)
+        self.cluster_seed = int(self.get_parameter("cluster_seed").value)
 
         qos = QoSProfile(depth=1)
         qos.reliability = ReliabilityPolicy.BEST_EFFORT
@@ -146,6 +182,11 @@ class MaskDepthFusionNode(Node):
         self.pub_points = self.create_publisher(
             type(xyz_to_pointcloud2(np.zeros((0, 3), dtype=np.float32), CameraInfo().header)),
             "/perception/masked_points",
+            1,
+        )
+        self.pub_candidates = self.create_publisher(
+            type(xyz_to_pointcloud2(np.zeros((0, 3), dtype=np.float32), CameraInfo().header)),
+            "/perception/keypoint_candidates",
             1,
         )
         self.pub_valid = self.create_publisher(type(make_bool_msg(True)), "/perception/valid", 10)
@@ -169,11 +210,26 @@ class MaskDepthFusionNode(Node):
         self.publish_keypoint_xyz(nan, nan, nan)
         self.pub_valid.publish(make_bool_msg(False))
 
-    def publish_overlay(self, color_pack, u: float = None, v: float = None, lines=None, valid: bool = True):
+    def publish_overlay(
+        self,
+        color_pack,
+        u: float = None,
+        v: float = None,
+        candidate_pixels=None,
+        lines=None,
+        valid: bool = True,
+    ):
         if color_pack is None:
             return
         rgb, header = color_pack
-        overlay = draw_overlay(rgb, u=u, v=v, lines=lines, valid=valid)
+        overlay = draw_overlay(
+            rgb,
+            u=u,
+            v=v,
+            candidate_pixels=candidate_pixels,
+            lines=lines,
+            valid=valid,
+        )
         self.pub_overlay.publish(rgb8_to_imgmsg(overlay, header))
 
     def on_color(self, msg: Image):
@@ -220,6 +276,10 @@ class MaskDepthFusionNode(Node):
             self.publish_invalid()
             return
 
+        if color_pack is None:
+            self.publish_invalid()
+            return
+
         if not self._headers_are_aligned(msg.header, depth_pack[1]) or not self._headers_are_aligned(
             msg.header,
             info.header,
@@ -242,6 +302,7 @@ class MaskDepthFusionNode(Node):
             self.publish_invalid()
             return
 
+        rgb, _color_header = color_pack
         depth, _depth_header = depth_pack
 
         if depth.shape != mask.shape:
@@ -252,34 +313,88 @@ class MaskDepthFusionNode(Node):
             self.publish_invalid()
             return
 
-        centroid = mask_centroid(mask)
-        if centroid is None:
-            self.publish_overlay(color_pack, lines=["mask empty"], valid=False)
-            self.publish_invalid()
-            return
-
-        u, v = centroid
         fx, fy, cx, cy = intrinsics_from_camera_info(info)
 
-        # Using the median valid depth inside the mask suppresses outliers from
-        # isolated bad pixels and gives a more stable 3D target.
-        depth_values, _ = masked_valid_depth_values(mask, depth)
-        if depth_values.size == 0:
-            self.publish_overlay(color_pack, u=u, v=v, lines=["no valid depth in mask"], valid=False)
+        xyz_samples, rgb_samples, uv_samples = masked_rgbd_to_xyzrgbuv(
+            depth,
+            mask,
+            rgb,
+            fx,
+            fy,
+            cx,
+            cy,
+        )
+        if xyz_samples.shape[0] == 0:
+            self.publish_overlay(color_pack, lines=["no valid depth in mask"], valid=False)
             self.publish_invalid()
             return
 
-        z_med = float(np.median(depth_values))
-        x, y, z = pixel_to_xyz(u, v, z_med, fx, fy, cx, cy)
+        candidates_xyz, _candidate_uv = rekep_rgbd_candidates(
+            xyz_samples,
+            rgb_samples,
+            uv_samples,
+            num_clusters=self.cluster_count,
+            max_samples=self.cluster_max_samples,
+            pca_dim=self.cluster_pca_dim,
+            meanshift_bandwidth=self.cluster_meanshift_bandwidth_m,
+            xyz_weight=self.cluster_xyz_weight,
+            rgb_weight=self.cluster_rgb_weight,
+            seed=self.cluster_seed,
+        )
+        if candidates_xyz.shape[0] == 0:
+            self.publish_overlay(color_pack, lines=["no cluster proposals"], valid=False)
+            self.publish_invalid()
+            return
+
+        primary_index = select_primary_candidate(candidates_xyz, xyz_samples)
+        if primary_index is None:
+            self.publish_overlay(color_pack, lines=["no primary proposal"], valid=False)
+            self.publish_invalid()
+            return
+
+        primary_xyz = candidates_xyz[primary_index]
+        primary_uv = xyz_to_pixel(
+            float(primary_xyz[0]),
+            float(primary_xyz[1]),
+            float(primary_xyz[2]),
+            fx,
+            fy,
+            cx,
+            cy,
+        )
+        if primary_uv is None:
+            self.publish_overlay(color_pack, lines=["invalid primary proposal"], valid=False)
+            self.publish_invalid()
+            return
+
+        candidate_pixels = []
+        for candidate_xyz in candidates_xyz:
+            pixel = xyz_to_pixel(
+                float(candidate_xyz[0]),
+                float(candidate_xyz[1]),
+                float(candidate_xyz[2]),
+                fx,
+                fy,
+                cx,
+                cy,
+            )
+            if pixel is not None:
+                candidate_pixels.append(pixel)
+
+        u, v = primary_uv
+        x, y, z = [float(value) for value in primary_xyz]
 
         self.pub_keypoint_px.publish(make_point_stamped(u, v, 0.0, msg.header))
         self.pub_keypoint_3d.publish(make_point_stamped(x, y, z, msg.header))
+        self.pub_candidates.publish(xyz_to_pointcloud2(candidates_xyz, msg.header))
         self.publish_keypoint_xyz(x, y, z)
         self.publish_overlay(
             color_pack,
             u=u,
             v=v,
+            candidate_pixels=candidate_pixels,
             lines=[
+                f"candidates={candidates_xyz.shape[0]}",
                 f"px=({u:.1f}, {v:.1f})",
                 f"x={x:.3f} m",
                 f"y={y:.3f} m",

@@ -2,6 +2,8 @@
 
 This repository contains a ROS 2 Humble workspace for KUKA iiwa simulation in PyBullet, joint-space motion control, robot-state monitoring, RGB-D camera simulation, and a perception loop that turns segmented image regions into 3D targets.
 
+Current archived patch release: `v0.1.1`
+
 The maintained path in this branch is the main chain:
 
 ```text
@@ -24,7 +26,7 @@ iiwa_pybullet_rgbd_sim_node
 sam3_mask_node
   -> /sam3/mask, /sam3/score
 mask_depth_fusion_node
-  -> /perception/keypoint_3d, /perception/valid
+  -> /perception/keypoint_3d, /perception/keypoint_candidates, /perception/valid
 iiwa_keypoint_tracker_node
   -> /iiwa7/joint_desired, /iiwa7/control_mode
 ```
@@ -88,14 +90,46 @@ Simple launcher:
 
 ### Run The RGB-D And Perception Path
 
+Recommended one-command launcher for the current tabletop demo:
+
+```bash
+./start_rekep_demo.sh start
+```
+
+This launcher starts:
+
+- RGB-D simulation with the raised table and colored cubes
+- `sam3_mask_node` inside `~/venvs/ros_vla`
+- clustering-based keypoint fusion
+- the keypoint tracker
+- `robotstate_bridge`
+- `robot_monitor`
+
 Launch the RGB-D backend and perception nodes explicitly:
 
 ```bash
 ros2 run pybullet_ros2_sim iiwa_pybullet_rgbd_sim_node
-ros2 run sam3_ros sam3_mask_node
 ros2 run perception_geometry mask_depth_fusion_node
 ros2 run pybullet_ros2_sim iiwa_keypoint_tracker_node
 ```
+
+Start SAM3 manually from its dedicated virtual environment:
+
+```bash
+source /opt/ros/humble/setup.bash
+source ~/ros2_workspaces/humble/ros2_pybullet_ws/install/setup.bash
+source ~/venvs/ros_vla/bin/activate
+
+python -m sam3_ros.sam3_mask_node --ros-args \
+  -p image_topic:=/sim/camera/color/image_raw \
+  -p prompt:="red cube" \
+  -p device:="cuda"
+```
+
+The RGB-D scene includes a raised table and multiple colored cubes so text prompts
+such as `red cube` can target a specific object. The perception node publishes a
+single primary keypoint for tracking plus clustered proposal points on
+`/perception/keypoint_candidates`.
 
 ## Main Packages And Entry Points
 
