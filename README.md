@@ -4,6 +4,8 @@ This repository contains a ROS 2 Humble workspace for KUKA iiwa simulation in Py
 
 Current archived patch release: `v0.1.1`
 
+Current feature branch in progress: `feature/llm-task-execution`
+
 The maintained path in this branch is the main chain:
 
 ```text
@@ -29,6 +31,10 @@ mask_depth_fusion_node
   -> /perception/keypoint_3d, /perception/keypoint_candidates, /perception/valid
 iiwa_keypoint_tracker_node
   -> /iiwa7/joint_desired, /iiwa7/control_mode
+llm_task_planner_node
+  -> /llm_task/plan_json
+llm_task_executor_node
+  -> /sam3/prompt, sequential execution status
 ```
 
 ## Repository Layout
@@ -96,6 +102,12 @@ Recommended one-command launcher for the current tabletop demo:
 ./start_rekep_demo.sh start
 ```
 
+Recommended one-command launcher for the LLM task-decomposition branch:
+
+```bash
+OPENAI_API_KEY=... ./start_llm_rekep_demo.sh start
+```
+
 This launcher starts:
 
 - RGB-D simulation with the raised table and colored cubes
@@ -104,6 +116,11 @@ This launcher starts:
 - the keypoint tracker
 - `robotstate_bridge`
 - `robot_monitor`
+
+The LLM launcher additionally starts:
+
+- `llm_task_planner_node`
+- `llm_task_executor_node`
 
 Launch the RGB-D backend and perception nodes explicitly:
 
@@ -124,6 +141,15 @@ python -m sam3_ros.sam3_mask_node --ros-args \
   -p image_topic:=/sim/camera/color/image_raw \
   -p prompt:="red cube" \
   -p device:="cuda"
+```
+
+In the LLM branch, `sam3_mask_node` also listens on `/sam3/prompt`, so the
+executor can switch target objects at runtime without restarting the node.
+
+To send a natural-language task:
+
+```bash
+ros2 topic pub --once /llm_task/instruction std_msgs/msg/String "{data: '依次移动到红色方块、蓝色方块和黄色方块上方'}"
 ```
 
 The RGB-D scene includes a raised table and multiple colored cubes so text prompts

@@ -29,6 +29,8 @@ setup(
             'iiwa_impedance_controller = pybullet_ros2_sim.iiwa_impedance_controller:main',
             'iiwa_line_ik_desired = pybullet_ros2_sim.iiwa_line_ik_desired:main',
             'iiwa_keypoint_tracker_node = pybullet_ros2_sim.iiwa_keypoint_tracker_node:main',
+            'llm_task_planner_node = pybullet_ros2_sim.llm_task_planner_node:main',
+            'llm_task_executor_node = pybullet_ros2_sim.llm_task_executor_node:main',
         ],
     },
 )

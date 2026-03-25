@@ -12,7 +12,7 @@ from PIL import Image as PILImage
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
-from std_msgs.msg import Float32
+from std_msgs.msg import Float32, String
 from transformers import Sam3Model, Sam3Processor
 
 
@@ -61,6 +61,7 @@ class Sam3MaskNode(Node):
         self.declare_parameter("max_side", 640)
         self.declare_parameter("infer_hz", 0.5)
         self.declare_parameter("device", "cpu")
+        self.declare_parameter("prompt_topic", "/sam3/prompt")
 
         self.image_topic = self.get_parameter("image_topic").value
         self.prompt = self.get_parameter("prompt").value
@@ -69,12 +70,14 @@ class Sam3MaskNode(Node):
         self.max_side = int(self.get_parameter("max_side").value)
         self.infer_hz = float(self.get_parameter("infer_hz").value)
         self.device = self.get_parameter("device").value
+        self.prompt_topic = self.get_parameter("prompt_topic").value
 
         qos = QoSProfile(depth=1)
         qos.reliability = ReliabilityPolicy.BEST_EFFORT
         qos.durability = DurabilityPolicy.VOLATILE
 
         self.sub = self.create_subscription(Image, self.image_topic, self.on_image, qos)
+        self.sub_prompt = self.create_subscription(String, self.prompt_topic, self.on_prompt, 10)
         self.pub_mask = self.create_publisher(Image, "/sam3/mask", 1)
         self.pub_score = self.create_publisher(Float32, "/sam3/score", 1)
 
@@ -99,6 +102,13 @@ class Sam3MaskNode(Node):
             f"Subscribed: {self.image_topic} | Publishing: /sam3/mask + /sam3/score | "
             f"infer_hz={self.infer_hz}"
         )
+
+    def on_prompt(self, msg: String):
+        new_prompt = msg.data.strip()
+        if not new_prompt or new_prompt == self.prompt:
+            return
+        self.prompt = new_prompt
+        self.get_logger().info(f"Updated prompt: {self.prompt}")
 
     def on_image(self, msg: Image):
         rgb = imgmsg_to_rgb(msg)
