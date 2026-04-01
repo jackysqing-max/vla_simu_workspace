@@ -7,11 +7,11 @@ WS_SETUP="$WS/install/setup.bash"
 
 SAM3_VENV="${SAM3_VENV:-$HOME/venvs/ros_vla}"
 SAM3_PROMPT="${SAM3_PROMPT:-red cube}"
-SAM3_DEVICE="${SAM3_DEVICE:-cuda}"
+SAM3_DEVICE="${SAM3_DEVICE:-cpu}"
+SAM3_INFER_HZ="${SAM3_INFER_HZ:-1.0}"
+SAM3_MAX_SIDE="${SAM3_MAX_SIDE:-320}"
 HOVER_OFFSET_Z="${HOVER_OFFSET_Z:-0.10}"
-
-OPENAI_MODEL="${OPENAI_MODEL:-gpt-5-mini}"
-OPENAI_REASONING_EFFORT="${OPENAI_REASONING_EFFORT:-low}"
+PYTORCH_ALLOC_CONF_VALUE="${PYTORCH_ALLOC_CONF_VALUE:-expandable_segments:True}"
 
 LOG_DIR="$WS/run_logs"
 PID_DIR="$WS/run_pids"
@@ -72,6 +72,7 @@ start_bg_sam3() {
     source \"$ROS_SETUP\"
     source \"$WS_SETUP\"
     source \"$SAM3_VENV/bin/activate\"
+    export PYTORCH_ALLOC_CONF=\"$PYTORCH_ALLOC_CONF_VALUE\"
     set -u 2>/dev/null || true
     exec $cmd
   " >"$log" 2>&1 &
@@ -114,7 +115,7 @@ wait_topic() {
 }
 
 show_status() {
-  for name in sim sam3 fusion tracker bridge monitor planner executor; do
+  for name in sim sam3 fusion tracker bridge monitor; do
     local pidf
     pidf="$(pidfile_for "$name")"
     if [[ -f "$pidf" ]] && pg_alive "$(cat "$pidf" 2>/dev/null || true)"; then
@@ -125,25 +126,20 @@ show_status() {
   done
 }
 
-run_task_shell() {
+run_prompt_shell() {
   source_ros
-  python3 "$WS/scripts/llm_task_cli.py"
+  python3 "$WS/scripts/semantic_prompt_cli.py"
 }
 
-send_one_task() {
+send_one_prompt() {
   local text="$1"
   source_ros
-  python3 "$WS/scripts/llm_task_cli.py" --once "$text"
+  python3 "$WS/scripts/semantic_prompt_cli.py" --once "$text"
 }
 
 case "${1:-start}" in
   start)
     source_ros
-
-    if [[ -z "${OPENAI_API_KEY:-}" ]]; then
-      err "OPENAI_API_KEY is not set"
-      exit 1
-    fi
 
     start_bg_ros sim \
       "ros2 run pybullet_ros2_sim iiwa_pybullet_rgbd_sim_node --ros-args \
@@ -159,18 +155,21 @@ case "${1:-start}" in
        -p image_topic:=/sim/camera/color/image_raw \
        -p prompt:=\"$SAM3_PROMPT\" \
        -p device:=\"$SAM3_DEVICE\" \
-       -p infer_hz:=2.0 \
-       -p max_side:=384"
+       -p infer_hz:=$SAM3_INFER_HZ \
+       -p max_side:=$SAM3_MAX_SIDE"
 
     start_bg_ros fusion \
       "ros2 run perception_geometry mask_depth_fusion_node --ros-args \
-       -p cluster_count:=4 -p cluster_max_samples:=512 -p cluster_meanshift_bandwidth_m:=0.04"
+       -p cluster_count:=4 -p cluster_max_samples:=512 \
+       -p cluster_meanshift_bandwidth_m:=0.04 \
+       -p top_surface_band_m:=0.012 \
+       -p top_surface_min_fraction:=0.15"
 
     start_bg_ros tracker \
       "ros2 run pybullet_ros2_sim iiwa_keypoint_tracker_node --ros-args \
        -p publish_hz:=60.0 -p max_joint_step_rad:=0.06 \
        -p hover_offset_z:=$HOVER_OFFSET_Z \
-       -p start_enabled:=false"
+       -p start_enabled:=true"
 
     start_bg_ros bridge \
       "ros2 run iiwa_state_udp_bridge robotstate_bridge --ros-args -p rate_hz:=60.0"
@@ -178,36 +177,24 @@ case "${1:-start}" in
     start_bg_ros monitor \
       "ros2 run robot_monitor robot_monitor"
 
-    start_bg_ros planner \
-      "ros2 run pybullet_ros2_sim llm_task_planner_node --ros-args \
-       -p model:=\"$OPENAI_MODEL\" \
-       -p reasoning_effort:=\"$OPENAI_REASONING_EFFORT\""
-
-    start_bg_ros executor \
-      "ros2 run pybullet_ros2_sim llm_task_executor_node --ros-args \
-       -p hover_offset_z:=$HOVER_OFFSET_Z \
-       -p default_success_radius_m:=0.10"
-
-    info "LLM tabletop demo stack started"
+    info "Semantic tracking demo started"
     info "sam3 prompt=$SAM3_PROMPT device=$SAM3_DEVICE venv=$SAM3_VENV"
+    info "sam3 infer_hz=$SAM3_INFER_HZ max_side=$SAM3_MAX_SIDE"
     info "hover_offset_z=$HOVER_OFFSET_Z"
-    info "openai model=$OPENAI_MODEL reasoning_effort=$OPENAI_REASONING_EFFORT"
     info "Open another terminal and run:"
-    echo "  ./start_llm_rekep_demo.sh shell"
-    info "Or send one command directly:"
-    echo "  ./start_llm_rekep_demo.sh task '依次移动到红色方块、蓝色方块和黄色方块上方'"
+    echo "  ./start_semantic_tracking_demo.sh shell"
+    info "Or switch target directly:"
+    echo "  ./start_semantic_tracking_demo.sh prompt 'blue cube'"
     ;;
 
   stop)
-    stop_one executor
-    stop_one planner
     stop_one monitor
     stop_one bridge
     stop_one tracker
     stop_one fusion
     stop_one sam3
     stop_one sim
-    info "LLM tabletop demo stack stopped"
+    info "Semantic tracking demo stopped"
     ;;
 
   status)
@@ -221,9 +208,7 @@ case "${1:-start}" in
       "$(logfile_for fusion)" \
       "$(logfile_for tracker)" \
       "$(logfile_for bridge)" \
-      "$(logfile_for monitor)" \
-      "$(logfile_for planner)" \
-      "$(logfile_for executor)" 2>/dev/null || true
+      "$(logfile_for monitor)" 2>/dev/null || true
     ;;
 
   clean)
@@ -231,34 +216,32 @@ case "${1:-start}" in
     ;;
 
   shell|interactive)
-    run_task_shell
+    run_prompt_shell
     ;;
 
-  task)
+  prompt)
     shift || true
     if [[ $# -eq 0 ]]; then
-      err "Usage: $0 task \"your instruction\""
+      err "Usage: $0 prompt \"target prompt\""
       exit 1
     fi
-    send_one_task "$*"
+    send_one_prompt "$*"
     ;;
 
   *)
-    echo "Usage: $0 {start|stop|status|logs|shell|interactive|task|clean}"
-    echo "Required env:"
-    echo "  OPENAI_API_KEY=..."
+    echo "Usage: $0 {start|stop|status|logs|shell|interactive|prompt|clean}"
     echo "Optional env:"
-    echo "  OPENAI_MODEL=gpt-5-mini"
-    echo "  OPENAI_REASONING_EFFORT=low"
     echo "  SAM3_VENV=$HOME/venvs/ros_vla"
     echo "  SAM3_PROMPT='red cube'"
-    echo "  SAM3_DEVICE=cuda"
+    echo "  SAM3_DEVICE=cpu"
+    echo "  SAM3_INFER_HZ=1.0"
+    echo "  SAM3_MAX_SIDE=320"
     echo "  HOVER_OFFSET_Z=0.10"
     echo "Examples:"
     echo "  $0 start"
     echo "  $0 clean"
     echo "  $0 shell"
-    echo "  $0 task '依次移动到红色方块、蓝色方块和黄色方块上方'"
+    echo "  $0 prompt 'blue cube'"
     exit 1
     ;;
 esac

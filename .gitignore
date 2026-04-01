@@ -24,6 +24,8 @@ dist/
 venv/
 env/
 .env
+.codex
+start_llm_rekep_demo.local.sh
 
 # ===== IDE =====
 .vscode/

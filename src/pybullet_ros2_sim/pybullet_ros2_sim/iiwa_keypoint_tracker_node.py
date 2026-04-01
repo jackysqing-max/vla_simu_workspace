@@ -69,6 +69,8 @@ class IiwaKeypointTracker(Node):
         self.declare_parameter("keep_initial_orientation", True)
         self.declare_parameter("control_mode_value", 1)
         self.declare_parameter("target_timeout_sec", 0.5)
+        self.declare_parameter("enable_topic", "/llm_task/tracking_enabled")
+        self.declare_parameter("start_enabled", True)
 
         self.publish_hz = float(self.get_parameter("publish_hz").value)
         self.hover_offset_z = float(self.get_parameter("hover_offset_z").value)
@@ -79,6 +81,8 @@ class IiwaKeypointTracker(Node):
         )
         self.control_mode_value = int(self.get_parameter("control_mode_value").value)
         self.target_timeout_sec = float(self.get_parameter("target_timeout_sec").value)
+        self.enable_topic = str(self.get_parameter("enable_topic").value)
+        self.tracking_enabled = bool(self.get_parameter("start_enabled").value)
 
         self.sub_keypoint = self.create_subscription(
             PointStamped,
@@ -88,6 +92,7 @@ class IiwaKeypointTracker(Node):
         )
         self.sub_valid = self.create_subscription(Bool, "/perception/valid", self.on_valid, 10)
         self.sub_js = self.create_subscription(JointState, "/iiwa7/joint_states", self.on_js, 10)
+        self.sub_enable = self.create_subscription(Bool, self.enable_topic, self.on_enable, 10)
 
         self.pub_mode = self.create_publisher(Int8, "/iiwa7/control_mode", 10)
         self.pub_qdes = self.create_publisher(Float64MultiArray, "/iiwa7/joint_desired", 10)
@@ -105,7 +110,14 @@ class IiwaKeypointTracker(Node):
         self.ee_orn0 = None
 
         self.timer = self.create_timer(1.0 / max(self.publish_hz, 1e-6), self.on_timer)
-        self.get_logger().info("iiwa_keypoint_tracker_node started")
+        self.get_logger().info(
+            "iiwa_keypoint_tracker_node started "
+            f"(tracking_enabled={self.tracking_enabled}, enable_topic={self.enable_topic})"
+        )
+
+    def on_enable(self, msg: Bool):
+        with self.lock:
+            self.tracking_enabled = bool(msg.data)
 
     def on_valid(self, msg: Bool):
         with self.lock:
@@ -152,7 +164,10 @@ class IiwaKeypointTracker(Node):
             target_valid = self.target_valid
             target_cam = None if self.target_cam is None else np.array(self.target_cam, copy=True)
             header = self.target_cam_header
+            tracking_enabled = self.tracking_enabled
 
+        if not tracking_enabled:
+            return
         if q_now is None or target_cam is None or header is None:
             return
         if not target_valid:

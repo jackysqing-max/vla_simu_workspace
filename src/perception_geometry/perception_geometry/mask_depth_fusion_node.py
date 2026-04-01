@@ -12,6 +12,7 @@ from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo, Image
 from std_msgs.msg import Float32
 from geometry_msgs.msg import PointStamped
+from tf2_ros import Buffer, TransformListener
 
 from perception_geometry.pointcloud_ops import (
     intrinsics_from_camera_info,
@@ -56,6 +57,83 @@ def rgb8_to_imgmsg(rgb: np.ndarray, header) -> Image:
     msg.step = msg.width * 3
     msg.data = rgb.tobytes()
     return msg
+
+
+def transform_to_matrix(tf_msg):
+    """Convert a TF transform into a homogeneous 4x4 matrix."""
+    t = tf_msg.transform.translation
+    q = tf_msg.transform.rotation
+    x, y, z, w = q.x, q.y, q.z, q.w
+
+    rot = np.array(
+        [
+            [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+            [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+            [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+        ],
+        dtype=np.float64,
+    )
+
+    transform = np.eye(4, dtype=np.float64)
+    transform[:3, :3] = rot
+    transform[:3, 3] = [t.x, t.y, t.z]
+    return transform
+
+
+def transform_points(transform: np.ndarray, points_xyz: np.ndarray):
+    """Apply a homogeneous transform to an `Nx3` point cloud."""
+    if points_xyz.shape[0] == 0:
+        return np.zeros((0, 3), dtype=np.float32)
+    homog = np.concatenate(
+        [points_xyz.astype(np.float64), np.ones((points_xyz.shape[0], 1), dtype=np.float64)],
+        axis=1,
+    )
+    transformed = (transform @ homog.T).T
+    return transformed[:, :3].astype(np.float32)
+
+
+def select_top_surface_point(
+    xyz_cam: np.ndarray,
+    cam_to_world: np.ndarray,
+    *,
+    top_band_m: float,
+    min_fraction: float,
+):
+    """Estimate the center of the visible top surface in camera coordinates.
+
+    We convert the masked cloud into the world frame, take the points near the
+    maximum world `z`, and average that slice. This yields a point on the cube's
+    top face instead of the object centroid.
+    """
+    if xyz_cam.shape[0] == 0:
+        return None, None, np.zeros((0, 3), dtype=np.float32)
+
+    xyz_world = transform_points(cam_to_world, xyz_cam)
+    z_world = xyz_world[:, 2]
+    z_max = float(np.max(z_world))
+
+    top_mask = z_world >= z_max - max(float(top_band_m), 1e-4)
+    min_count = max(8, int(np.ceil(float(min_fraction) * xyz_world.shape[0])))
+
+    if int(np.count_nonzero(top_mask)) < min_count:
+        keep_count = min(min_count, xyz_world.shape[0])
+        top_indices = np.argsort(z_world)[-keep_count:]
+    else:
+        top_indices = np.flatnonzero(top_mask)
+
+    top_world = xyz_world[top_indices]
+    center_world = np.array(
+        [
+            float(np.median(top_world[:, 0])),
+            float(np.median(top_world[:, 1])),
+            float(np.mean(top_world[:, 2])),
+        ],
+        dtype=np.float64,
+    )
+
+    world_to_cam = np.linalg.inv(cam_to_world)
+    center_cam = transform_points(world_to_cam, center_world.reshape(1, 3))[0]
+    return center_cam.astype(np.float32), center_world.astype(np.float32), top_world
 
 
 def draw_overlay(
@@ -145,6 +223,9 @@ class MaskDepthFusionNode(Node):
         self.declare_parameter("cluster_xyz_weight", 1.0)
         self.declare_parameter("cluster_rgb_weight", 0.35)
         self.declare_parameter("cluster_seed", 0)
+        self.declare_parameter("target_frame", "world")
+        self.declare_parameter("top_surface_band_m", 0.012)
+        self.declare_parameter("top_surface_min_fraction", 0.15)
 
         self.mask_topic = self.get_parameter("mask_topic").value
         self.color_topic = self.get_parameter("color_topic").value
@@ -163,6 +244,11 @@ class MaskDepthFusionNode(Node):
         self.cluster_xyz_weight = float(self.get_parameter("cluster_xyz_weight").value)
         self.cluster_rgb_weight = float(self.get_parameter("cluster_rgb_weight").value)
         self.cluster_seed = int(self.get_parameter("cluster_seed").value)
+        self.target_frame = str(self.get_parameter("target_frame").value)
+        self.top_surface_band_m = float(self.get_parameter("top_surface_band_m").value)
+        self.top_surface_min_fraction = float(
+            self.get_parameter("top_surface_min_fraction").value
+        )
 
         qos = QoSProfile(depth=1)
         qos.reliability = ReliabilityPolicy.BEST_EFFORT
@@ -197,6 +283,8 @@ class MaskDepthFusionNode(Node):
         self.latest_depth = None
         self.latest_info = None
         self.latest_score = 0.0
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
 
         self.get_logger().info("mask_depth_fusion_node started")
 
@@ -352,7 +440,26 @@ class MaskDepthFusionNode(Node):
             self.publish_invalid()
             return
 
-        primary_xyz = candidates_xyz[primary_index]
+        try:
+            tf_msg = self.tf_buffer.lookup_transform(self.target_frame, msg.header.frame_id, Time())
+            cam_to_world = transform_to_matrix(tf_msg)
+            primary_xyz, primary_world_xyz, top_world = select_top_surface_point(
+                xyz_samples,
+                cam_to_world,
+                top_band_m=self.top_surface_band_m,
+                min_fraction=self.top_surface_min_fraction,
+            )
+        except Exception as exc:
+            self.get_logger().warn(f"top-surface TF lookup failed: {exc}")
+            primary_xyz = candidates_xyz[primary_index]
+            primary_world_xyz = None
+            top_world = np.zeros((0, 3), dtype=np.float32)
+
+        if primary_xyz is None:
+            self.publish_overlay(color_pack, lines=["no top-surface point"], valid=False)
+            self.publish_invalid()
+            return
+
         primary_uv = xyz_to_pixel(
             float(primary_xyz[0]),
             float(primary_xyz[1]),
@@ -395,10 +502,16 @@ class MaskDepthFusionNode(Node):
             candidate_pixels=candidate_pixels,
             lines=[
                 f"candidates={candidates_xyz.shape[0]}",
+                f"surface_pts={top_world.shape[0]}",
                 f"px=({u:.1f}, {v:.1f})",
                 f"x={x:.3f} m",
                 f"y={y:.3f} m",
                 f"z={z:.3f} m",
+                (
+                    f"world_z={float(primary_world_xyz[2]):.3f} m"
+                    if primary_world_xyz is not None
+                    else "world_z=n/a"
+                ),
             ],
             valid=True,
         )

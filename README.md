@@ -94,7 +94,13 @@ Simple launcher:
 
 ### Run The RGB-D And Perception Path
 
-Recommended one-command launcher for the current tabletop demo:
+Recommended one-command launcher for the stable semantic-tracking demo:
+
+```bash
+./start_semantic_tracking_demo.sh start
+```
+
+Compatibility alias:
 
 ```bash
 ./start_rekep_demo.sh start
@@ -106,14 +112,57 @@ Recommended one-command launcher for the LLM task-decomposition demo:
 OPENAI_API_KEY=... ./start_llm_rekep_demo.sh start
 ```
 
+The LLM launcher keeps the tracker idle until a task plan arrives, then enables
+tracking step by step and uses a shared hover offset above each cube. Override
+that clearance if needed with `HOVER_OFFSET_Z=0.10`.
+
+If you prefer a local wrapper that keeps your key out of git, copy
+`start_llm_rekep_demo.local.example.sh` to `start_llm_rekep_demo.local.sh`,
+fill in your real `OPENAI_API_KEY`, then run:
+
+```bash
+./start_llm_rekep_demo.local.sh start
+```
+
+After the stack is running, open a second terminal for task input:
+
+```bash
+./start_llm_rekep_demo.sh shell
+```
+
+Then type instructions directly, for example:
+
+```text
+依次移动到红色方块、蓝色方块和黄色方块上方
+```
+
+You can also send a one-shot instruction without entering the shell:
+
+```bash
+./start_llm_rekep_demo.sh task "依次移动到红色方块、蓝色方块和黄色方块上方"
+```
+
 This launcher starts:
 
 - RGB-D simulation with the raised table and colored cubes
 - `sam3_mask_node` inside `~/venvs/ros_vla`
-- clustering-based keypoint fusion
-- the keypoint tracker
+- top-surface keypoint fusion
+- the keypoint tracker with a fixed hover offset above the visible top face
 - `robotstate_bridge`
 - `robot_monitor`
+
+After the semantic-tracking stack is running, open a second terminal and switch
+targets directly:
+
+```bash
+./start_semantic_tracking_demo.sh shell
+```
+
+Or send a one-shot prompt:
+
+```bash
+./start_semantic_tracking_demo.sh prompt "blue cube"
+```
 
 The LLM launcher additionally starts:
 

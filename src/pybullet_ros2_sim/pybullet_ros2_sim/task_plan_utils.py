@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 
 SUPPORTED_ACTIONS = ("hover_target", "wait")
@@ -59,6 +60,19 @@ _TARGET_SYNONYMS = {
     "blue cube": ("blue cube", "blue", "blue block", "蓝", "蓝色", "蓝色方块"),
     "yellow cube": ("yellow cube", "yellow", "yellow block", "黄", "黄色", "黄色方块"),
 }
+
+_ALIAS_TO_CANONICAL = {
+    alias.lower(): canonical
+    for canonical, aliases in _TARGET_SYNONYMS.items()
+    for alias in aliases
+}
+_TARGET_PATTERN = re.compile(
+    "|".join(
+        re.escape(alias)
+        for alias in sorted(_ALIAS_TO_CANONICAL, key=len, reverse=True)
+    ),
+    flags=re.IGNORECASE,
+)
 
 
 def normalize_target_prompt(raw_prompt: str) -> str:
@@ -132,6 +146,50 @@ def sanitize_plan(raw_plan: dict) -> dict:
         "planning_notes": str(plan.get("planning_notes", "")).strip(),
         "steps": steps,
     }
+
+
+def infer_plan_from_instruction(instruction_text: str) -> dict:
+    """Build a deterministic hover-only plan from color mentions in the instruction.
+
+    This fallback keeps the demo usable even if the remote planner is unavailable.
+    """
+    text = (instruction_text or "").strip()
+    lowered = text.lower()
+    matches = []
+    for match in _TARGET_PATTERN.finditer(lowered):
+        canonical = _ALIAS_TO_CANONICAL.get(match.group(0).lower())
+        if canonical:
+            matches.append((match.start(), canonical))
+
+    ordered_targets = [canonical for _pos, canonical in sorted(matches, key=lambda item: item[0])]
+    if not ordered_targets:
+        return {
+            "task_summary": "Fallback task",
+            "planning_notes": "No supported tabletop target was found in the instruction.",
+            "steps": [],
+        }
+
+    steps = []
+    for step_index, target_prompt in enumerate(ordered_targets, start=1):
+        steps.append(
+            {
+                "step_index": step_index,
+                "action": "hover_target",
+                "target_prompt": target_prompt,
+                "description": f"hover above {target_prompt}",
+                "success_radius_m": 0.10,
+                "dwell_sec": 0.4,
+                "wait_sec": 0.0,
+            }
+        )
+
+    return sanitize_plan(
+        {
+            "task_summary": text if text else "Fallback task",
+            "planning_notes": "Generated locally from ordered color mentions.",
+            "steps": steps,
+        }
+    )
 
 
 def plan_to_json(plan: dict) -> str:

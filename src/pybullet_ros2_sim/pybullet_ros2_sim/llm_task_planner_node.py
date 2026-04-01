@@ -15,6 +15,7 @@ from std_msgs.msg import String
 from pybullet_ros2_sim.task_plan_utils import (
     PLAN_JSON_SCHEMA,
     SUPPORTED_TARGET_PROMPTS,
+    infer_plan_from_instruction,
     plan_to_json,
     sanitize_plan,
 )
@@ -130,25 +131,32 @@ class LlmTaskPlanner(Node):
         plan_text = _extract_response_text(response_json)
         return sanitize_plan(json.loads(plan_text))
 
+    def _plan_with_fallback(self, instruction: str) -> tuple[dict, bool]:
+        try:
+            return self._request_plan(instruction), False
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="ignore")
+            self.get_logger().error(f"[PLAN] HTTPError {exc.code}: {detail}")
+        except Exception as exc:
+            self.get_logger().error(f"[PLAN] failed: {exc}")
+
+        fallback_plan = infer_plan_from_instruction(instruction)
+        if fallback_plan["steps"]:
+            self.get_logger().warning(
+                f"[PLAN] using local fallback with {len(fallback_plan['steps'])} steps"
+            )
+            return fallback_plan, True
+        return fallback_plan, True
+
     def on_instruction(self, msg: String):
         instruction = msg.data.strip()
         if not instruction:
             return
 
         self.get_logger().info(f"[PLAN] instruction={instruction}")
-        self._publish_status(f"planning: {instruction}")
+        self._publish_status("planning")
 
-        try:
-            plan = self._request_plan(instruction)
-        except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="ignore")
-            self.get_logger().error(f"[PLAN] HTTPError {exc.code}: {detail}")
-            self._publish_status(f"planning_failed: http_{exc.code}")
-            return
-        except Exception as exc:
-            self.get_logger().error(f"[PLAN] failed: {exc}")
-            self._publish_status("planning_failed")
-            return
+        plan, used_fallback = self._plan_with_fallback(instruction)
 
         if not plan["steps"]:
             self.get_logger().warning("[PLAN] no executable steps returned")
@@ -158,7 +166,10 @@ class LlmTaskPlanner(Node):
         out = String()
         out.data = plan_to_json(plan)
         self.pub_plan.publish(out)
-        self._publish_status(f"planned: {plan['task_summary']} ({len(plan['steps'])} steps)")
+        if used_fallback:
+            self._publish_status(f"planned_fallback: {len(plan['steps'])} steps")
+        else:
+            self._publish_status(f"planned: {len(plan['steps'])} steps")
         self.get_logger().info(f"[PLAN] published {len(plan['steps'])} steps")
 
 

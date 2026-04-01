@@ -54,16 +54,18 @@ class LlmTaskExecutor(Node):
         self.declare_parameter("plan_topic", "/llm_task/plan_json")
         self.declare_parameter("prompt_topic", "/sam3/prompt")
         self.declare_parameter("status_topic", "/llm_task/status")
+        self.declare_parameter("tracking_enable_topic", "/llm_task/tracking_enabled")
         self.declare_parameter("target_frame", "world")
-        self.declare_parameter("hover_offset_z", 0.05)
+        self.declare_parameter("hover_offset_z", 0.10)
         self.declare_parameter("prompt_republish_sec", 1.0)
         self.declare_parameter("control_hz", 20.0)
         self.declare_parameter("target_timeout_sec", 1.0)
-        self.declare_parameter("default_success_radius_m", 0.06)
+        self.declare_parameter("default_success_radius_m", 0.10)
 
         self.plan_topic = str(self.get_parameter("plan_topic").value)
         self.prompt_topic = str(self.get_parameter("prompt_topic").value)
         self.status_topic = str(self.get_parameter("status_topic").value)
+        self.tracking_enable_topic = str(self.get_parameter("tracking_enable_topic").value)
         self.target_frame = str(self.get_parameter("target_frame").value)
         self.hover_offset_z = float(self.get_parameter("hover_offset_z").value)
         self.prompt_republish_sec = float(self.get_parameter("prompt_republish_sec").value)
@@ -83,9 +85,11 @@ class LlmTaskExecutor(Node):
         self.step_started_ns = None
         self.step_satisfied_ns = None
         self.last_prompt_pub_ns = 0
+        self.last_tracking_enabled = None
 
         self.pub_prompt = self.create_publisher(String, self.prompt_topic, 10)
         self.pub_status = self.create_publisher(String, self.status_topic, 10)
+        self.pub_tracking_enable = self.create_publisher(Bool, self.tracking_enable_topic, 10)
 
         self.create_subscription(String, self.plan_topic, self.on_plan, 10)
         self.create_subscription(JointState, "/iiwa7/joint_states", self.on_joint_states, 10)
@@ -97,6 +101,7 @@ class LlmTaskExecutor(Node):
         self.ik = IiwaIkHelper()
 
         self.timer = self.create_timer(1.0 / max(self.control_hz, 1e-6), self.on_timer)
+        self._set_tracking_enabled(False)
         self.get_logger().info("llm_task_executor_node started")
 
     def _publish_status(self, text: str):
@@ -113,11 +118,21 @@ class LlmTaskExecutor(Node):
         self.pub_prompt.publish(msg)
         self.last_prompt_pub_ns = self._now_ns()
 
+    def _set_tracking_enabled(self, enabled: bool):
+        enabled = bool(enabled)
+        if self.last_tracking_enabled is enabled:
+            return
+        msg = Bool()
+        msg.data = enabled
+        self.pub_tracking_enable.publish(msg)
+        self.last_tracking_enabled = enabled
+
     def on_plan(self, msg: String):
         try:
             plan = plan_from_json(msg.data)
         except Exception as exc:
             self.get_logger().error(f"[EXEC] invalid plan: {exc}")
+            self._set_tracking_enabled(False)
             self._publish_status("execution_failed: invalid_plan")
             return
 
@@ -131,6 +146,7 @@ class LlmTaskExecutor(Node):
         self.get_logger().info(
             f"[EXEC] loaded plan '{plan['task_summary']}' with {len(plan['steps'])} steps"
         )
+        self._set_tracking_enabled(False)
         self._publish_status(f"execution_loaded: {plan['task_summary']}")
 
     def on_joint_states(self, msg: JointState):
@@ -167,6 +183,7 @@ class LlmTaskExecutor(Node):
 
         if self.step_cursor >= len(self.plan["steps"]):
             self.get_logger().info(f"[EXEC] plan complete: {self.plan['task_summary']}")
+            self._set_tracking_enabled(False)
             self._publish_status(f"execution_complete: {self.plan['task_summary']}")
             return
 
@@ -188,8 +205,10 @@ class LlmTaskExecutor(Node):
             target_header = self.target_header
 
         if plan is None or not plan["steps"]:
+            self._set_tracking_enabled(False)
             return
         if step_cursor >= len(plan["steps"]):
+            self._set_tracking_enabled(False)
             return
 
         step = plan["steps"][step_cursor]
@@ -206,10 +225,12 @@ class LlmTaskExecutor(Node):
             )
 
         if step["action"] == "wait":
+            self._set_tracking_enabled(False)
             if (now_ns - self.step_started_ns) * 1e-9 >= step["wait_sec"]:
                 self._advance_step()
             return
 
+        self._set_tracking_enabled(True)
         if (now_ns - self.last_prompt_pub_ns) * 1e-9 >= self.prompt_republish_sec:
             self._publish_prompt(step["target_prompt"])
 
