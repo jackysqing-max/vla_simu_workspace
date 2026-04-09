@@ -280,3 +280,5 @@ dot -Tsvg docs/workspace_architecture.dot -o docs/generated/workspace_architectu
   - A one-page architecture sheet with a talk track for presenting the pipeline clearly.
 - `docs/teaching/student_reproduction_manual.md`
   - A lab-style reproduction manual for students to rebuild the current `v0.1.4` system.
+- `docs/teaching/core_code_walkthrough.md`
+  - Guided walkthrough of the 5 key files students should read first when studying the codebase.
