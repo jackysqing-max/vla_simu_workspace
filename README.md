@@ -282,3 +282,5 @@ dot -Tsvg docs/workspace_architecture.dot -o docs/generated/workspace_architectu
   - A lab-style reproduction manual for students to rebuild the current `v0.1.4` system.
 - `docs/teaching/core_code_walkthrough.md`
   - Guided walkthrough of the 5 key files students should read first when studying the codebase.
+- `docs/teaching/algorithm_focused_lecture_notes.md`
+  - A deeper, algorithm-oriented lecture note that connects deep learning, geometry, LLM planning, and robot control.
