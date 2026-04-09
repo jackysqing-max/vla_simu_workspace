@@ -271,3 +271,12 @@ dot -Tsvg docs/workspace_architecture.dot -o docs/generated/workspace_architectu
   - End-to-end local deployment, validation, and single-GPU staged execution notes for Qwen3.
 - `docs/qwen3_vla_integration_roadmap.md`
   - Roadmap for evolving the current planner-based stack toward a more complete layered VLA architecture.
+
+## Teaching Materials
+
+- `docs/teaching/10_minute_teaching_outline.md`
+  - A class-ready outline for explaining the system to students who already have basic AI background.
+- `docs/teaching/one_page_architecture_talk.md`
+  - A one-page architecture sheet with a talk track for presenting the pipeline clearly.
+- `docs/teaching/student_reproduction_manual.md`
+  - A lab-style reproduction manual for students to rebuild the current `v0.1.4` system.
