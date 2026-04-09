@@ -9,7 +9,7 @@ PID_DIR="$WS/run_pids"
 info() { echo "[INFO] $*"; }
 warn() { echo "[WARN] $*" >&2; }
 
-PATTERN="start_llm_rekep_demo|start_semantic_tracking_demo|start_rekep_demo|semantic_prompt_cli|iiwa_pybullet_rgbd_sim_node|iiwa_keypoint_tracker_node|llm_task_planner_node|llm_task_executor_node|sam3_mask_node|mask_depth_fusion_node|robotstate_bridge|robot_monitor|sam3_ros|pybullet_ros2_sim|perception_geometry"
+PATTERN="start_llm_rekep_demo|start_semantic_tracking_demo|start_rekep_demo|semantic_prompt_cli|llm_task_cli|iiwa_pybullet_rgbd_sim_node|iiwa_keypoint_tracker_node|scene_object_registry_node|llm_task_planner_node|llm_task_executor_node|sam3_mask_node|mask_depth_fusion_node|robotstate_bridge|robot_monitor"
 
 source_ros() {
   set +u
@@ -54,10 +54,27 @@ stop_ros_daemon() {
 }
 
 show_remaining() {
+  local matches=""
+  if command -v pgrep >/dev/null 2>&1; then
+    matches="$(pgrep -af "$PATTERN" || true)"
+    if [[ -n "$matches" ]]; then
+      echo "$matches"
+    else
+      echo "[INFO] none"
+    fi
+    return 0
+  fi
+
   if command -v rg >/dev/null 2>&1; then
-    ps -ef | rg "$PATTERN" | grep -v " rg " || true
+    matches="$(ps -ef | rg "$PATTERN" | grep -v " rg " || true)"
   else
-    ps -ef | grep -E "$PATTERN" | grep -v "grep -E" || true
+    matches="$(ps -ef | grep -E "$PATTERN" | grep -v "grep -E" || true)"
+  fi
+
+  if [[ -n "$matches" ]]; then
+    echo "$matches"
+  else
+    echo "[INFO] none"
   fi
 }
 
@@ -70,6 +87,7 @@ main() {
   kill_matches "sam3_mask_node"
   kill_matches "iiwa_pybullet_rgbd_sim_node"
   kill_matches "iiwa_keypoint_tracker_node"
+  kill_matches "scene_object_registry_node"
   kill_matches "llm_task_planner_node"
   kill_matches "llm_task_executor_node"
   kill_matches "mask_depth_fusion_node"
@@ -85,6 +103,7 @@ main() {
 
   info "remaining matching processes:"
   show_remaining
+  info "clean completed"
 }
 
 main "$@"

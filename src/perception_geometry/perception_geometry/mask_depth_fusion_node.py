@@ -1,6 +1,8 @@
 """Fuse SAM3 mask output with depth to produce a stable 3D keypoint."""
 
+from collections import deque
 import threading
+import time
 
 import numpy as np
 import rclpy
@@ -216,6 +218,7 @@ class MaskDepthFusionNode(Node):
         self.declare_parameter("overlay_topic", "/perception/keypoint_overlay")
         self.declare_parameter("min_score", 0.0)
         self.declare_parameter("max_frame_age_sec", 0.2)
+        self.declare_parameter("frame_buffer_sec", 30.0)
         self.declare_parameter("cluster_count", 6)
         self.declare_parameter("cluster_max_samples", 2048)
         self.declare_parameter("cluster_pca_dim", 3)
@@ -235,6 +238,7 @@ class MaskDepthFusionNode(Node):
         self.overlay_topic = self.get_parameter("overlay_topic").value
         self.min_score = float(self.get_parameter("min_score").value)
         self.max_frame_age_sec = float(self.get_parameter("max_frame_age_sec").value)
+        self.frame_buffer_sec = float(self.get_parameter("frame_buffer_sec").value)
         self.cluster_count = int(self.get_parameter("cluster_count").value)
         self.cluster_max_samples = int(self.get_parameter("cluster_max_samples").value)
         self.cluster_pca_dim = int(self.get_parameter("cluster_pca_dim").value)
@@ -279,14 +283,25 @@ class MaskDepthFusionNode(Node):
         self.pub_overlay = self.create_publisher(Image, self.overlay_topic, 10)
 
         self.lock = threading.Lock()
-        self.latest_color = None
-        self.latest_depth = None
-        self.latest_info = None
+        self.color_buffer = deque()
+        self.depth_buffer = deque()
+        self.info_buffer = deque()
         self.latest_score = 0.0
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
+        self._last_status_log_time = 0.0
 
         self.get_logger().info("mask_depth_fusion_node started")
+
+    def _log_status(self, message: str, *, level: str = "info"):
+        now = time.time()
+        if now - self._last_status_log_time < 2.0:
+            return
+        self._last_status_log_time = now
+        if level == "warn":
+            self.get_logger().warning(message)
+        else:
+            self.get_logger().info(message)
 
     def publish_keypoint_xyz(self, x: float, y: float, z: float):
         self.pub_keypoint_x.publish(make_float32_msg(x))
@@ -322,66 +337,115 @@ class MaskDepthFusionNode(Node):
 
     def on_color(self, msg: Image):
         with self.lock:
-            self.latest_color = (imgmsg_to_rgb8(msg), msg.header)
+            self._buffer_push(self.color_buffer, imgmsg_to_rgb8(msg), msg.header)
 
     def on_depth(self, msg: Image):
         with self.lock:
-            self.latest_depth = (imgmsg_to_depth32f(msg), msg.header)
+            self._buffer_push(self.depth_buffer, imgmsg_to_depth32f(msg), msg.header)
 
     def on_info(self, msg: CameraInfo):
         with self.lock:
-            self.latest_info = msg
+            self._buffer_push(self.info_buffer, msg, msg.header)
 
     def on_score(self, msg: Float32):
         with self.lock:
             self.latest_score = float(msg.data)
 
-    def _headers_are_aligned(self, ref_header, other_header) -> bool:
-        if self.max_frame_age_sec <= 0.0:
-            return True
+    def _buffer_push(self, buffer: deque, payload, header):
+        now_sec = time.time()
+        buffer.append((payload, header, now_sec))
+        if self.frame_buffer_sec <= 0.0:
+            while len(buffer) > 1:
+                buffer.popleft()
+            return
+
+        cutoff = now_sec - self.frame_buffer_sec
+        while buffer and buffer[0][2] < cutoff:
+            buffer.popleft()
+
+    def _header_delta_sec(self, ref_header, other_header):
         if ref_header is None or other_header is None:
-            return False
+            return None
         ref_zero = ref_header.stamp.sec == 0 and ref_header.stamp.nanosec == 0
         other_zero = other_header.stamp.sec == 0 and other_header.stamp.nanosec == 0
         if ref_zero or other_zero:
-            return True
+            return 0.0
         ref_time = Time.from_msg(ref_header.stamp)
         other_time = Time.from_msg(other_header.stamp)
-        age = abs((ref_time - other_time).nanoseconds) * 1e-9
+        return abs((ref_time - other_time).nanoseconds) * 1e-9
+
+    def _headers_are_aligned(self, ref_header, other_header) -> bool:
+        if self.max_frame_age_sec <= 0.0:
+            return True
+        age = self._header_delta_sec(ref_header, other_header)
+        if age is None:
+            return False
         return age <= self.max_frame_age_sec
+
+    def _find_buffer_match(self, ref_header, buffer: deque):
+        if not buffer:
+            return None
+
+        best_payload = None
+        best_header = None
+        best_age = None
+
+        for payload, header, _recv_time in reversed(buffer):
+            age = self._header_delta_sec(ref_header, header)
+            if age is None:
+                continue
+            if best_age is None or age < best_age:
+                best_payload = payload
+                best_header = header
+                best_age = age
+                if age <= 1e-9:
+                    break
+
+        if best_payload is None:
+            return None
+        if self.max_frame_age_sec > 0.0 and (best_age is None or best_age > self.max_frame_age_sec):
+            return None
+        return best_payload, best_header
 
     def on_mask(self, msg: Image):
         mask = imgmsg_to_mask_u8(msg)
 
         with self.lock:
-            color_pack = self.latest_color
-            depth_pack = self.latest_depth
-            info = self.latest_info
             score = self.latest_score
+            color_pack = self._find_buffer_match(msg.header, self.color_buffer)
+            depth_pack = self._find_buffer_match(msg.header, self.depth_buffer)
+            info_pack = self._find_buffer_match(msg.header, self.info_buffer)
+
+        info = None if info_pack is None else info_pack[0]
 
         if depth_pack is None or info is None:
+            self._log_status("waiting for depth/camera_info", level="warn")
             self.publish_overlay(color_pack, lines=["waiting for depth/camera_info"], valid=False)
             self.publish_invalid()
             return
 
         if color_pack is None:
+            self._log_status("waiting for color frame", level="warn")
             self.publish_invalid()
             return
 
-        if not self._headers_are_aligned(msg.header, depth_pack[1]) or not self._headers_are_aligned(
-            msg.header,
-            info.header,
-        ):
+        if not self._headers_are_aligned(msg.header, depth_pack[1]) or not self._headers_are_aligned(msg.header, info.header):
+            self._log_status("stale depth or camera_info", level="warn")
             self.publish_overlay(color_pack, lines=["stale depth or camera_info"], valid=False)
             self.publish_invalid()
             return
 
         if color_pack is not None and not self._headers_are_aligned(msg.header, color_pack[1]):
+            self._log_status("stale color frame", level="warn")
             self.publish_overlay(color_pack, lines=["stale color frame"], valid=False)
             self.publish_invalid()
             return
 
         if score < self.min_score:
+            self._log_status(
+                f"score {score:.3f} below min_score {self.min_score:.3f}",
+                level="warn",
+            )
             self.publish_overlay(
                 color_pack,
                 lines=[f"score={score:.2f} < {self.min_score:.2f}"],
@@ -413,6 +477,7 @@ class MaskDepthFusionNode(Node):
             cy,
         )
         if xyz_samples.shape[0] == 0:
+            self._log_status("no valid depth in mask", level="warn")
             self.publish_overlay(color_pack, lines=["no valid depth in mask"], valid=False)
             self.publish_invalid()
             return
@@ -430,12 +495,14 @@ class MaskDepthFusionNode(Node):
             seed=self.cluster_seed,
         )
         if candidates_xyz.shape[0] == 0:
+            self._log_status("no cluster proposals", level="warn")
             self.publish_overlay(color_pack, lines=["no cluster proposals"], valid=False)
             self.publish_invalid()
             return
 
         primary_index = select_primary_candidate(candidates_xyz, xyz_samples)
         if primary_index is None:
+            self._log_status("no primary proposal", level="warn")
             self.publish_overlay(color_pack, lines=["no primary proposal"], valid=False)
             self.publish_invalid()
             return
@@ -456,6 +523,7 @@ class MaskDepthFusionNode(Node):
             top_world = np.zeros((0, 3), dtype=np.float32)
 
         if primary_xyz is None:
+            self._log_status("no top-surface point", level="warn")
             self.publish_overlay(color_pack, lines=["no top-surface point"], valid=False)
             self.publish_invalid()
             return
@@ -470,6 +538,7 @@ class MaskDepthFusionNode(Node):
             cy,
         )
         if primary_uv is None:
+            self._log_status("invalid primary proposal", level="warn")
             self.publish_overlay(color_pack, lines=["invalid primary proposal"], valid=False)
             self.publish_invalid()
             return
@@ -514,6 +583,10 @@ class MaskDepthFusionNode(Node):
                 ),
             ],
             valid=True,
+        )
+        self._log_status(
+            f"valid target score={score:.3f} keypoint=({x:.3f}, {y:.3f}, {z:.3f}) "
+            f"candidates={candidates_xyz.shape[0]}"
         )
 
         xyz = masked_depth_to_xyz(depth, mask, fx, fy, cx, cy)

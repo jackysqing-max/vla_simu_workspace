@@ -60,7 +60,8 @@ class LlmTaskExecutor(Node):
         self.declare_parameter("prompt_republish_sec", 1.0)
         self.declare_parameter("control_hz", 20.0)
         self.declare_parameter("target_timeout_sec", 1.0)
-        self.declare_parameter("default_success_radius_m", 0.10)
+        self.declare_parameter("default_success_radius_m", 0.06)
+        self.declare_parameter("target_reacquire_delay_sec", 0.75)
 
         self.plan_topic = str(self.get_parameter("plan_topic").value)
         self.prompt_topic = str(self.get_parameter("prompt_topic").value)
@@ -74,16 +75,22 @@ class LlmTaskExecutor(Node):
         self.default_success_radius_m = float(
             self.get_parameter("default_success_radius_m").value
         )
+        self.target_reacquire_delay_sec = float(
+            self.get_parameter("target_reacquire_delay_sec").value
+        )
 
         self.lock = threading.Lock()
         self.q_now = None
         self.target_valid = False
         self.target_cam = None
         self.target_header = None
+        self.target_received_ns = 0
         self.plan = None
         self.step_cursor = 0
         self.step_started_ns = None
         self.step_satisfied_ns = None
+        self.step_prompt_sent_ns = None
+        self.step_target_confirmed_ns = None
         self.last_prompt_pub_ns = 0
         self.last_tracking_enabled = None
 
@@ -141,6 +148,8 @@ class LlmTaskExecutor(Node):
             self.step_cursor = 0
             self.step_started_ns = None
             self.step_satisfied_ns = None
+            self.step_prompt_sent_ns = None
+            self.step_target_confirmed_ns = None
             self.last_prompt_pub_ns = 0
 
         self.get_logger().info(
@@ -163,6 +172,7 @@ class LlmTaskExecutor(Node):
         with self.lock:
             self.target_cam = np.array([msg.point.x, msg.point.y, msg.point.z], dtype=np.float64)
             self.target_header = msg.header
+            self.target_received_ns = self._now_ns()
 
     def _target_is_fresh(self, header) -> bool:
         if self.target_timeout_sec <= 0.0:
@@ -180,6 +190,8 @@ class LlmTaskExecutor(Node):
         self.step_cursor += 1
         self.step_started_ns = None
         self.step_satisfied_ns = None
+        self.step_prompt_sent_ns = None
+        self.step_target_confirmed_ns = None
 
         if self.step_cursor >= len(self.plan["steps"]):
             self.get_logger().info(f"[EXEC] plan complete: {self.plan['task_summary']}")
@@ -195,6 +207,27 @@ class LlmTaskExecutor(Node):
             f"step_started: {next_step['step_index']} {next_step['description']}"
         )
 
+    def _target_is_ready_for_current_step(
+        self,
+        *,
+        target_valid: bool,
+        target_header,
+        target_received_ns: int,
+    ) -> bool:
+        if not target_valid:
+            return False
+        if target_header is None:
+            return False
+        if not self._target_is_fresh(target_header):
+            return False
+        if self.step_prompt_sent_ns is None:
+            return False
+
+        min_confirm_ns = self.step_prompt_sent_ns + int(
+            max(self.target_reacquire_delay_sec, 0.0) * 1e9
+        )
+        return target_received_ns >= min_confirm_ns
+
     def on_timer(self):
         with self.lock:
             plan = self.plan
@@ -203,6 +236,7 @@ class LlmTaskExecutor(Node):
             target_valid = self.target_valid
             target_cam = None if self.target_cam is None else np.array(self.target_cam, copy=True)
             target_header = self.target_header
+            target_received_ns = self.target_received_ns
 
         if plan is None or not plan["steps"]:
             self._set_tracking_enabled(False)
@@ -217,6 +251,8 @@ class LlmTaskExecutor(Node):
         if self.step_started_ns is None:
             self.step_started_ns = now_ns
             self.step_satisfied_ns = None
+            self.step_prompt_sent_ns = None
+            self.step_target_confirmed_ns = None
             self.get_logger().info(
                 f"[EXEC] step {step['step_index']}: {step['description']}"
             )
@@ -230,15 +266,48 @@ class LlmTaskExecutor(Node):
                 self._advance_step()
             return
 
-        self._set_tracking_enabled(True)
-        if (now_ns - self.last_prompt_pub_ns) * 1e-9 >= self.prompt_republish_sec:
+        if self.step_prompt_sent_ns is None:
             self._publish_prompt(step["target_prompt"])
+            self.step_prompt_sent_ns = self.last_prompt_pub_ns
+            self._set_tracking_enabled(False)
+            self._publish_status(
+                f"step_waiting_target: {step['step_index']} {step['target_prompt']}"
+            )
+            return
+
+        if (
+            self.step_target_confirmed_ns is None
+            and (now_ns - self.last_prompt_pub_ns) * 1e-9 >= self.prompt_republish_sec
+        ):
+            self._publish_prompt(step["target_prompt"])
+            self._set_tracking_enabled(False)
+
+        if self.step_target_confirmed_ns is None:
+            if not self._target_is_ready_for_current_step(
+                target_valid=target_valid,
+                target_header=target_header,
+                target_received_ns=target_received_ns,
+            ):
+                return
+            self.step_target_confirmed_ns = now_ns
+            self.step_satisfied_ns = None
+            self._set_tracking_enabled(True)
+            self.get_logger().info(
+                f"[EXEC] step {step['step_index']} target confirmed: {step['target_prompt']}"
+            )
+            self._publish_status(
+                f"step_target_confirmed: {step['step_index']} {step['target_prompt']}"
+            )
+
+        self._set_tracking_enabled(True)
 
         if q_now is None or target_cam is None or target_header is None:
             return
         if not target_valid:
+            self.step_satisfied_ns = None
             return
         if not self._target_is_fresh(target_header):
+            self.step_satisfied_ns = None
             return
 
         try:

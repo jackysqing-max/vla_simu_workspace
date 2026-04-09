@@ -2,7 +2,7 @@
 
 This repository contains a ROS 2 Humble workspace for KUKA iiwa simulation in PyBullet, joint-space motion control, robot-state monitoring, RGB-D camera simulation, and a perception loop that turns segmented image regions into 3D targets.
 
-Current archived patch release: `v0.1.2`
+Current archived patch release: `v0.1.4`
 
 The maintained path in this branch is the main chain:
 
@@ -112,6 +112,26 @@ Recommended one-command launcher for the LLM task-decomposition demo:
 OPENAI_API_KEY=... ./start_llm_rekep_demo.sh start
 ```
 
+To run the same demo against the local Qwen3 backend:
+
+```bash
+LLM_BACKEND=qwen3_local ./start_llm_rekep_demo.sh start
+```
+
+If Qwen3 and SAM3 cannot fit on the same GPU at the same time, use the staged
+single-GPU mode:
+
+```bash
+LLM_BACKEND=qwen3_local GPU_EXECUTION_MODE=staged_single_gpu ./start_llm_rekep_demo.sh start
+LLM_BACKEND=qwen3_local GPU_EXECUTION_MODE=staged_single_gpu ./start_llm_rekep_demo.sh task "依次移动到红色方块、蓝色方块和黄色方块上方"
+```
+
+If your X11 session is unstable or unavailable, start the sim headlessly:
+
+```bash
+SIM_GUI=false LLM_BACKEND=qwen3_local GPU_EXECUTION_MODE=staged_single_gpu ./start_llm_rekep_demo.sh start
+```
+
 The LLM launcher keeps the tracker idle until a task plan arrives, then enables
 tracking step by step and uses a shared hover offset above each cube. Override
 that clearance if needed with `HOVER_OFFSET_Z=0.10`.
@@ -168,6 +188,9 @@ The LLM launcher additionally starts:
 
 - `llm_task_planner_node`
 - `llm_task_executor_node`
+
+When `LLM_BACKEND=qwen3_local`, the launcher also starts the local Qwen3 vLLM
+service automatically if it is not already ready on `127.0.0.1:8000`.
 
 Launch the RGB-D backend and perception nodes explicitly:
 
@@ -239,3 +262,12 @@ dot -Tsvg docs/workspace_architecture.dot -o docs/generated/workspace_architectu
 - Root launch scripts now resolve the workspace from the script location instead of assuming a hard-coded absolute path.
 - `start_iiwa_monitoring_stack.sh` is an auxiliary template for custom trajectory-monitoring experiments rather than the default maintained launch path.
 - This branch focuses on the cleaned main chain and removes older duplicate entry points that were not part of the maintained runtime path.
+
+## Version Notes
+
+- `docs/v0.1.4_release_notes.md`
+  - Summary of what changed from the archived `v0.1.3` baseline to the current local-Qwen3 single-GPU VLA demo path.
+- `docs/qwen3_local_deployment.md`
+  - End-to-end local deployment, validation, and single-GPU staged execution notes for Qwen3.
+- `docs/qwen3_vla_integration_roadmap.md`
+  - Roadmap for evolving the current planner-based stack toward a more complete layered VLA architecture.

@@ -84,7 +84,7 @@ class Sam3MaskNode(Node):
         # The worker always consumes the newest frame only; this keeps slow model
         # inference from building up stale backlog.
         self.q = queue.Queue(maxsize=1)
-        self.last_header = None
+        self._last_status_log_time = 0.0
 
         self.get_logger().info(f"Loading SAM3 on {self.device} ...")
         self.model = Sam3Model.from_pretrained("facebook/sam3").to(self.device)
@@ -112,14 +112,20 @@ class Sam3MaskNode(Node):
 
     def on_image(self, msg: Image):
         rgb = imgmsg_to_rgb(msg)
-        self.last_header = msg.header
 
         if self.q.full():
             try:
                 self.q.get_nowait()
             except Exception:
                 pass
-        self.q.put_nowait(rgb)
+        self.q.put_nowait((rgb, msg.header))
+
+    def _log_status(self, message: str):
+        now = time.time()
+        if now - self._last_status_log_time < 2.0:
+            return
+        self._last_status_log_time = now
+        self.get_logger().info(message)
 
     def infer_loop(self):
         period = 1.0 / max(self.infer_hz, 1e-6)
@@ -132,7 +138,7 @@ class Sam3MaskNode(Node):
                 continue
 
             try:
-                rgb = self.q.get(timeout=0.5)
+                rgb, header = self.q.get(timeout=0.5)
             except queue.Empty:
                 continue
 
@@ -168,6 +174,7 @@ class Sam3MaskNode(Node):
 
                 top_mask = None
                 top_score = 0.0
+                best_score = float(np.max(scores)) if scores.size > 0 else 0.0
 
                 if scores.size > 0:
                     keep = scores >= self.score_th
@@ -181,6 +188,15 @@ class Sam3MaskNode(Node):
                         (rgb_small.shape[0], rgb_small.shape[1]),
                         dtype=np.uint8,
                     )
+                    self._log_status(
+                        f"prompt='{self.prompt}' no mask above threshold "
+                        f"(best_score={best_score:.3f}, score_th={self.score_th:.3f})"
+                    )
+                else:
+                    mask_area = int(np.count_nonzero(top_mask))
+                    self._log_status(
+                        f"prompt='{self.prompt}' mask score={top_score:.3f} area={mask_area}"
+                    )
 
                 if (rgb_small.shape[0], rgb_small.shape[1]) != (orig_h, orig_w):
                     top_mask = np.array(
@@ -190,11 +206,10 @@ class Sam3MaskNode(Node):
                         )
                     )
 
-                if self.last_header is not None:
-                    self.pub_mask.publish(mask_to_imgmsg(top_mask, self.last_header))
-                    score_msg = Float32()
-                    score_msg.data = top_score
-                    self.pub_score.publish(score_msg)
+                self.pub_mask.publish(mask_to_imgmsg(top_mask, header))
+                score_msg = Float32()
+                score_msg.data = top_score
+                self.pub_score.publish(score_msg)
 
             except Exception as exc:
                 self.get_logger().error(f"Infer error: {exc!r}")

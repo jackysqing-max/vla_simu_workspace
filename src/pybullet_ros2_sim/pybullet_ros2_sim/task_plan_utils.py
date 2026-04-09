@@ -117,7 +117,7 @@ def sanitize_plan(raw_plan: dict) -> dict:
 
         target_prompt = normalize_target_prompt(str(raw_step.get("target_prompt", "")))
         success_radius_m = _positive_float(raw_step.get("success_radius_m", 0.06), 0.06)
-        dwell_sec = _positive_float(raw_step.get("dwell_sec", 0.8), 0.8)
+        dwell_sec = _positive_float(raw_step.get("dwell_sec", 1.0), 1.0)
         wait_sec = _positive_float(raw_step.get("wait_sec", 1.0), 1.0)
 
         if action == "wait":
@@ -177,8 +177,8 @@ def infer_plan_from_instruction(instruction_text: str) -> dict:
                 "action": "hover_target",
                 "target_prompt": target_prompt,
                 "description": f"hover above {target_prompt}",
-                "success_radius_m": 0.10,
-                "dwell_sec": 0.4,
+                "success_radius_m": 0.06,
+                "dwell_sec": 1.0,
                 "wait_sec": 0.0,
             }
         )
@@ -198,3 +198,63 @@ def plan_to_json(plan: dict) -> str:
 
 def plan_from_json(text: str) -> dict:
     return sanitize_plan(json.loads(text))
+
+
+def scene_registry_from_json(text: str) -> dict:
+    """Parse the scene registry JSON published by the object-registry node."""
+    try:
+        data = json.loads(text)
+    except Exception:
+        return {"target_frame": "world", "updated_at_sec": 0.0, "objects": []}
+
+    objects = data.get("objects", [])
+    if not isinstance(objects, list):
+        objects = []
+
+    return {
+        "target_frame": str(data.get("target_frame", "world")),
+        "updated_at_sec": _positive_float(data.get("updated_at_sec", 0.0), 0.0),
+        "objects": [obj for obj in objects if isinstance(obj, dict)],
+    }
+
+
+def scene_registry_summary(scene_registry: dict, max_objects: int = 8) -> str:
+    """Render a compact scene summary for planner prompts."""
+    objects = [obj for obj in scene_registry.get("objects", []) if isinstance(obj, dict)]
+    if not objects:
+        return "No scene objects have been observed yet."
+
+    visible_objects = [obj for obj in objects if bool(obj.get("visible", False))]
+    hidden_objects = [obj for obj in objects if not bool(obj.get("visible", False))]
+
+    def _format_object(obj: dict) -> str:
+        label = str(obj.get("label", "object")).strip() or "object"
+        score = _positive_float(obj.get("confidence", 0.0), 0.0)
+        world = obj.get("position_world") if isinstance(obj.get("position_world"), dict) else {}
+        if {"x", "y", "z"} <= set(world):
+            try:
+                return (
+                    f"{label} at "
+                    f"({float(world['x']):.2f}, {float(world['y']):.2f}, {float(world['z']):.2f}) "
+                    f"score={score:.2f}"
+                )
+            except Exception:
+                pass
+        age_sec = _positive_float(obj.get("last_seen_age_sec", 0.0), 0.0)
+        return f"{label} score={score:.2f} age={age_sec:.1f}s"
+
+    parts = []
+    if visible_objects:
+        visible_text = "; ".join(_format_object(obj) for obj in visible_objects[:max_objects])
+        parts.append(f"Visible objects: {visible_text}.")
+    else:
+        parts.append("Visible objects: none.")
+
+    if hidden_objects:
+        hidden_text = ", ".join(
+            str(obj.get("label", "object")).strip() or "object"
+            for obj in hidden_objects[:max_objects]
+        )
+        parts.append(f"Previously observed objects: {hidden_text}.")
+
+    return " ".join(parts)
