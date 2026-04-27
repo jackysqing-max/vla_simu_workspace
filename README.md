@@ -2,7 +2,7 @@
 
 This repository contains a ROS 2 Humble workspace for KUKA iiwa simulation in PyBullet, joint-space motion control, robot-state monitoring, RGB-D camera simulation, and a perception loop that turns segmented image regions into 3D targets.
 
-Current archived patch release: `v0.1.4`
+Current archived patch release: `v0.1.5`
 
 The maintained path in this branch is the main chain:
 
@@ -45,6 +45,8 @@ The repository is intentionally organized around the main runtime chain:
   - PyBullet robot simulation, RGB-D simulation, desired-joint generators, and the impedance controller.
 - `src/perception_geometry/`
   - Mask and depth fusion utilities that extract a 3D keypoint from the camera stream.
+- `src/vla_rgbd_tools/`
+  - Real RGB-D launch and visualization helpers for live keypoint extraction with RealSense cameras.
 - `src/sam3_ros/`
   - ROS 2 wrapper for SAM-based mask generation.
 - `src/iiwa_state_udp_bridge/`
@@ -118,6 +120,14 @@ To run the same demo against the local Qwen3 backend:
 LLM_BACKEND=qwen3_local ./start_llm_rekep_demo.sh start
 ```
 
+To run the live RealSense RGB-D keypoint pipeline with local overlay visualization:
+
+```bash
+ros2 launch vla_rgbd_tools real_rgbd_keypoint_pipeline.launch.py \
+  realsense_serial_no:=YOUR_REALSENSE_SERIAL \
+  sam3_device:=cpu
+```
+
 If Qwen3 and SAM3 cannot fit on the same GPU at the same time, use the staged
 single-GPU mode:
 
@@ -131,6 +141,18 @@ If your X11 session is unstable or unavailable, start the sim headlessly:
 ```bash
 SIM_GUI=false LLM_BACKEND=qwen3_local GPU_EXECUTION_MODE=staged_single_gpu ./start_llm_rekep_demo.sh start
 ```
+
+The LLM launcher can also open a small per-node GPU monitor window. By default
+`GPU_MONITOR_WINDOW=auto`, so it opens only when a graphical `DISPLAY` is
+available. Disable it with:
+
+```bash
+GPU_MONITOR_WINDOW=false ./start_llm_rekep_demo.sh start
+```
+
+The monitor reads `run_pids/*.pid`, samples `nvidia-smi`, and groups GPU memory
+and process SM utilization back to the demo node names when the driver exposes
+that information.
 
 The LLM launcher keeps the tracker idle until a task plan arrives, then enables
 tracking step by step and uses a shared hover offset above each cube. Override
@@ -265,6 +287,8 @@ dot -Tsvg docs/workspace_architecture.dot -o docs/generated/workspace_architectu
 
 ## Version Notes
 
+- `docs/v0.1.5_release_notes.md`
+  - Summary of what changed from `v0.1.4` to the current RealSense-backed RGB-D tracking and monitoring release.
 - `docs/v0.1.4_release_notes.md`
   - Summary of what changed from the archived `v0.1.3` baseline to the current local-Qwen3 single-GPU VLA demo path.
 - `docs/qwen3_local_deployment.md`

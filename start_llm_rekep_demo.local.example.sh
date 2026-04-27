@@ -37,6 +37,8 @@ export SAM3_PROMPT="${SAM3_PROMPT:-red cube}"
 export SAM3_DEVICE="${SAM3_DEVICE:-cuda}"
 export HOVER_OFFSET_Z="${HOVER_OFFSET_Z:-0.10}"
 export SIM_GUI="${SIM_GUI:-false}"
+export GPU_MONITOR_WINDOW="${GPU_MONITOR_WINDOW:-auto}"
+export GPU_MONITOR_REFRESH_SEC="${GPU_MONITOR_REFRESH_SEC:-1.0}"
 
 if [[ "$LLM_BACKEND" == "openai" && "$OPENAI_API_KEY" == "PASTE_YOUR_OPENAI_API_KEY_HERE" ]]; then
   echo "[ERROR] Edit $(basename "$0") and replace OPENAI_API_KEY with your real key." >&2

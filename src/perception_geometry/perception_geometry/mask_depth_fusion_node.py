@@ -42,6 +42,29 @@ def imgmsg_to_depth32f(msg: Image) -> np.ndarray:
     return np.frombuffer(msg.data, dtype=np.float32).reshape(height, width).copy()
 
 
+def imgmsg_to_depth_meters(msg: Image, depth_scale: float) -> np.ndarray:
+    """Convert common ROS depth encodings into meters as float32."""
+    height, width = msg.height, msg.width
+    encoding = str(msg.encoding).lower()
+
+    if encoding in {"16uc1", "mono16"}:
+        depth_u16 = np.frombuffer(msg.data, dtype=np.uint16).reshape(height, width)
+        return depth_u16.astype(np.float32) * float(depth_scale)
+
+    if encoding in {"32fc1", "32fc"}:
+        return imgmsg_to_depth32f(msg)
+
+    # Some drivers leave the encoding blank but still set the row stride.
+    bytes_per_pixel = int(msg.step / max(width, 1)) if width > 0 else 0
+    if bytes_per_pixel == 2:
+        depth_u16 = np.frombuffer(msg.data, dtype=np.uint16).reshape(height, width)
+        return depth_u16.astype(np.float32) * float(depth_scale)
+    if bytes_per_pixel == 4:
+        return imgmsg_to_depth32f(msg)
+
+    raise ValueError(f"unsupported depth encoding: {msg.encoding!r}")
+
+
 def imgmsg_to_rgb8(msg: Image) -> np.ndarray:
     height, width = msg.height, msg.width
     arr = np.frombuffer(msg.data, dtype=np.uint8).reshape(height, width, 3)
@@ -216,6 +239,7 @@ class MaskDepthFusionNode(Node):
         self.declare_parameter("camera_info_topic", "/sim/camera/color/camera_info")
         self.declare_parameter("score_topic", "/sam3/score")
         self.declare_parameter("overlay_topic", "/perception/keypoint_overlay")
+        self.declare_parameter("depth_scale", 0.001)
         self.declare_parameter("min_score", 0.0)
         self.declare_parameter("max_frame_age_sec", 0.2)
         self.declare_parameter("frame_buffer_sec", 30.0)
@@ -236,6 +260,7 @@ class MaskDepthFusionNode(Node):
         self.camera_info_topic = self.get_parameter("camera_info_topic").value
         self.score_topic = self.get_parameter("score_topic").value
         self.overlay_topic = self.get_parameter("overlay_topic").value
+        self.depth_scale = float(self.get_parameter("depth_scale").value)
         self.min_score = float(self.get_parameter("min_score").value)
         self.max_frame_age_sec = float(self.get_parameter("max_frame_age_sec").value)
         self.frame_buffer_sec = float(self.get_parameter("frame_buffer_sec").value)
@@ -261,7 +286,12 @@ class MaskDepthFusionNode(Node):
         self.sub_mask = self.create_subscription(Image, self.mask_topic, self.on_mask, qos)
         self.sub_color = self.create_subscription(Image, self.color_topic, self.on_color, qos)
         self.sub_depth = self.create_subscription(Image, self.depth_topic, self.on_depth, qos)
-        self.sub_info = self.create_subscription(CameraInfo, self.camera_info_topic, self.on_info, 10)
+        self.sub_info = self.create_subscription(
+            CameraInfo,
+            self.camera_info_topic,
+            self.on_info,
+            qos,
+        )
         self.sub_score = self.create_subscription(Float32, self.score_topic, self.on_score, 10)
 
         self.pub_keypoint_px = self.create_publisher(PointStamped, "/perception/keypoint_px", 10)
@@ -340,8 +370,13 @@ class MaskDepthFusionNode(Node):
             self._buffer_push(self.color_buffer, imgmsg_to_rgb8(msg), msg.header)
 
     def on_depth(self, msg: Image):
+        try:
+            depth_m = imgmsg_to_depth_meters(msg, self.depth_scale)
+        except Exception as exc:
+            self._log_status(f"unsupported depth frame: {exc}", level="warn")
+            return
         with self.lock:
-            self._buffer_push(self.depth_buffer, imgmsg_to_depth32f(msg), msg.header)
+            self._buffer_push(self.depth_buffer, depth_m, msg.header)
 
     def on_info(self, msg: CameraInfo):
         with self.lock:
@@ -508,8 +543,15 @@ class MaskDepthFusionNode(Node):
             return
 
         try:
-            tf_msg = self.tf_buffer.lookup_transform(self.target_frame, msg.header.frame_id, Time())
-            cam_to_world = transform_to_matrix(tf_msg)
+            if self.target_frame == msg.header.frame_id:
+                cam_to_world = np.eye(4, dtype=np.float64)
+            else:
+                tf_msg = self.tf_buffer.lookup_transform(
+                    self.target_frame,
+                    msg.header.frame_id,
+                    Time(),
+                )
+                cam_to_world = transform_to_matrix(tf_msg)
             primary_xyz, primary_world_xyz, top_world = select_top_surface_point(
                 xyz_samples,
                 cam_to_world,

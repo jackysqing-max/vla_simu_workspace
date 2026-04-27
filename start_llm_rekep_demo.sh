@@ -14,6 +14,8 @@ SAM3_MASK_TH="${SAM3_MASK_TH:-0.40}"
 FUSION_MIN_SCORE="${FUSION_MIN_SCORE:-0.05}"
 TRACKER_TARGET_TIMEOUT_SEC="${TRACKER_TARGET_TIMEOUT_SEC:-2.0}"
 SIM_GUI="${SIM_GUI:-true}"
+GPU_MONITOR_WINDOW="${GPU_MONITOR_WINDOW:-auto}"
+GPU_MONITOR_REFRESH_SEC="${GPU_MONITOR_REFRESH_SEC:-1.0}"
 
 LLM_BACKEND="${LLM_BACKEND:-openai}"
 GPU_EXECUTION_MODE="${GPU_EXECUTION_MODE:-concurrent}"
@@ -69,6 +71,21 @@ is_truthy() {
 
 is_staged_single_gpu_mode() {
   [[ "$LLM_BACKEND" == "qwen3_local" && "$GPU_EXECUTION_MODE" == "staged_single_gpu" ]]
+}
+
+should_start_gpu_monitor() {
+  case "${GPU_MONITOR_WINDOW,,}" in
+    1|true|yes|y|on) return 0 ;;
+    0|false|no|n|off) return 1 ;;
+    auto)
+      [[ -n "${DISPLAY:-}" ]]
+      return
+      ;;
+    *)
+      warn "unknown GPU_MONITOR_WINDOW=$GPU_MONITOR_WINDOW; use auto, true, or false"
+      return 1
+      ;;
+  esac
 }
 
 managed_proc_running() {
@@ -195,6 +212,30 @@ start_bg_sam3() {
   local pid
   pid="$(cat "$pidf" 2>/dev/null || true)"
   info "started $name pid=${pid:-unknown}"
+}
+
+start_gpu_monitor_window() {
+  if ! should_start_gpu_monitor; then
+    if [[ "${GPU_MONITOR_WINDOW,,}" == "auto" && -z "${DISPLAY:-}" ]]; then
+      info "GPU monitor window skipped because DISPLAY is not set"
+    fi
+    return 0
+  fi
+
+  if ! command -v nvidia-smi >/dev/null 2>&1; then
+    warn "GPU monitor window skipped because nvidia-smi is not available"
+    return 0
+  fi
+
+  if ! python3 -c "import tkinter" >/dev/null 2>&1; then
+    warn "GPU monitor window skipped because Python tkinter is not available"
+    return 0
+  fi
+
+  start_bg_ros gpu_monitor \
+    "python3 \"$WS/scripts/gpu_node_monitor.py\" \
+     --pid-dir \"$PID_DIR\" \
+     --refresh-sec \"$GPU_MONITOR_REFRESH_SEC\""
 }
 
 stop_one() {
@@ -336,7 +377,7 @@ EOF
 }
 
 show_status() {
-  for name in sim sam3 fusion registry tracker bridge monitor qwen3 planner executor; do
+  for name in sim sam3 fusion registry tracker bridge monitor gpu_monitor qwen3 planner executor; do
     if [[ "$name" == "qwen3" ]]; then
       local pidf_qwen3
       pidf_qwen3="$(pidfile_for qwen3)"
@@ -438,6 +479,8 @@ case "${1:-start}" in
        -p default_success_radius_m:=0.06 \
        -p target_reacquire_delay_sec:=0.75"
 
+    start_gpu_monitor_window
+
     sleep 2
     if ! is_staged_single_gpu_mode; then
       warn_if_not_running sam3
@@ -445,12 +488,14 @@ case "${1:-start}" in
     warn_if_not_running fusion
     warn_if_not_running registry
     warn_if_not_running tracker
+    warn_if_not_running gpu_monitor
     warn_if_not_running planner
     warn_if_not_running executor
 
     info "LLM tabletop demo stack started"
     info "sam3 prompt=$SAM3_PROMPT device=$SAM3_DEVICE venv=$SAM3_VENV"
     info "sim gui=$SIM_GUI"
+    info "gpu monitor window=$GPU_MONITOR_WINDOW refresh_sec=$GPU_MONITOR_REFRESH_SEC"
     info "hover_offset_z=$HOVER_OFFSET_Z tracker_target_timeout_sec=$TRACKER_TARGET_TIMEOUT_SEC"
     info "sam3 score_th=$SAM3_SCORE_TH mask_th=$SAM3_MASK_TH fusion_min_score=$FUSION_MIN_SCORE"
     info "llm backend=$LLM_BACKEND"
@@ -470,6 +515,7 @@ case "${1:-start}" in
     stop_one executor
     stop_one planner
     stop_one qwen3
+    stop_one gpu_monitor
     stop_one monitor
     stop_one bridge
     stop_one tracker
@@ -493,9 +539,22 @@ case "${1:-start}" in
       "$(logfile_for tracker)" \
       "$(logfile_for bridge)" \
       "$(logfile_for monitor)" \
+      "$(logfile_for gpu_monitor)" \
       "$(logfile_for qwen3)" \
       "$(logfile_for planner)" \
       "$(logfile_for executor)" 2>/dev/null || true
+    ;;
+
+  gpu-monitor)
+    GPU_MONITOR_WINDOW=true
+    start_gpu_monitor_window
+    ;;
+
+  gpu-snapshot)
+    python3 "$WS/scripts/gpu_node_monitor.py" \
+      --pid-dir "$PID_DIR" \
+      --refresh-sec "$GPU_MONITOR_REFRESH_SEC" \
+      --once
     ;;
 
   clean)
@@ -567,7 +626,7 @@ case "${1:-start}" in
     ;;
 
   *)
-    echo "Usage: $0 {start|stop|status|logs|shell|interactive|task|clean|stop-qwen3-external}"
+    echo "Usage: $0 {start|stop|status|logs|gpu-monitor|gpu-snapshot|shell|interactive|task|clean|stop-qwen3-external}"
     echo "LLM backend env:"
     echo "  LLM_BACKEND=openai"
     echo "  LLM_BACKEND=qwen3_local"
@@ -597,6 +656,8 @@ case "${1:-start}" in
     echo "  HOVER_OFFSET_Z=0.10"
     echo "  TRACKER_TARGET_TIMEOUT_SEC=2.0"
     echo "  SIM_GUI=true"
+    echo "  GPU_MONITOR_WINDOW=auto"
+    echo "  GPU_MONITOR_REFRESH_SEC=1.0"
     echo "Examples:"
     echo "  OPENAI_API_KEY=... $0 start"
     echo "  LLM_BACKEND=qwen3_local $0 start"
@@ -607,6 +668,8 @@ case "${1:-start}" in
     echo "  LLM_BACKEND=qwen3_local SAM3_DEVICE=cpu $0 start"
     echo "  SIM_GUI=false LLM_BACKEND=qwen3_local GPU_EXECUTION_MODE=staged_single_gpu $0 start"
     echo "  $0 clean"
+    echo "  $0 gpu-monitor"
+    echo "  $0 gpu-snapshot"
     echo "  $0 shell"
     echo "  $0 task '依次移动到红色方块、蓝色方块和黄色方块上方'"
     exit 1

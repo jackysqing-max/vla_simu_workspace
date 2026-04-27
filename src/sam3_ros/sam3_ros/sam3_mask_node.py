@@ -69,7 +69,7 @@ class Sam3MaskNode(Node):
         self.mask_th = float(self.get_parameter("mask_th").value)
         self.max_side = int(self.get_parameter("max_side").value)
         self.infer_hz = float(self.get_parameter("infer_hz").value)
-        self.device = self.get_parameter("device").value
+        self.device = str(self.get_parameter("device").value)
         self.prompt_topic = self.get_parameter("prompt_topic").value
 
         qos = QoSProfile(depth=1)
@@ -85,6 +85,13 @@ class Sam3MaskNode(Node):
         # inference from building up stale backlog.
         self.q = queue.Queue(maxsize=1)
         self._last_status_log_time = 0.0
+
+        if self.device == "cuda" and not torch.cuda.is_available():
+            self.get_logger().warning(
+                "device='cuda' requested but torch.cuda.is_available() is False; "
+                "falling back to CPU"
+            )
+            self.device = "cpu"
 
         self.get_logger().info(f"Loading SAM3 on {self.device} ...")
         self.model = Sam3Model.from_pretrained("facebook/sam3").to(self.device)

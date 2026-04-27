@@ -58,7 +58,7 @@ class LlmTaskExecutor(Node):
         self.declare_parameter("target_frame", "world")
         self.declare_parameter("hover_offset_z", 0.10)
         self.declare_parameter("prompt_republish_sec", 1.0)
-        self.declare_parameter("control_hz", 20.0)
+        self.declare_parameter("control_hz", 200.0)
         self.declare_parameter("target_timeout_sec", 1.0)
         self.declare_parameter("default_success_radius_m", 0.06)
         self.declare_parameter("target_reacquire_delay_sec", 0.75)

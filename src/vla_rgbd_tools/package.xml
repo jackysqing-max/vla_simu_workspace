@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>vla_rgbd_tools</name>
+  <version>0.1.5</version>
+  <description>Real RGB-D launch and visualization tools for the VLA keypoint pipeline</description>
+  <maintainer email="jackysqing@gmail.com">siqin</maintainer>
+  <license>Apache-2.0</license>
+
+  <depend>rclpy</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>cv_bridge</depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>image_tools</exec_depend>
+  <exec_depend>realsense2_camera</exec_depend>
+  <exec_depend>robot_monitor</exec_depend>
+  <exec_depend>sam3_ros</exec_depend>
+  <exec_depend>perception_geometry</exec_depend>
+  <exec_depend>pybullet_ros2_sim</exec_depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
