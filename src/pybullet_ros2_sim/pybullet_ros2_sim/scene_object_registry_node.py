@@ -63,6 +63,7 @@ class SceneObjectRegistry(Node):
         self.declare_parameter("observation_timeout_sec", 1.5)
         self.declare_parameter("visible_timeout_sec", 2.0)
         self.declare_parameter("entry_ttl_sec", 60.0)
+        self.declare_parameter("open_vocabulary_targets", False)
 
         self.prompt_topic = str(self.get_parameter("prompt_topic").value)
         self.score_topic = str(self.get_parameter("score_topic").value)
@@ -77,6 +78,9 @@ class SceneObjectRegistry(Node):
         )
         self.visible_timeout_sec = float(self.get_parameter("visible_timeout_sec").value)
         self.entry_ttl_sec = float(self.get_parameter("entry_ttl_sec").value)
+        self.open_vocabulary_targets = bool(
+            self.get_parameter("open_vocabulary_targets").value
+        )
 
         self.lock = threading.Lock()
         self.current_prompt = ""
@@ -155,7 +159,10 @@ class SceneObjectRegistry(Node):
             point_cam = None if self.latest_keypoint is None else np.array(self.latest_keypoint, copy=True)
             header = self.latest_keypoint_header
 
-        label = normalize_target_prompt(prompt)
+        label = normalize_target_prompt(
+            prompt,
+            allow_open_vocabulary=self.open_vocabulary_targets,
+        )
         if not label or not target_valid or point_cam is None or header is None:
             return
         if not self._keypoint_is_fresh(header):

@@ -21,6 +21,7 @@ exec "${VLLM_BIN}" serve "${MODEL}" \
   --tensor-parallel-size "${TENSOR_PARALLEL_SIZE}" \
   --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}" \
   --max-model-len "${MAX_MODEL_LEN}" \
+  --generation-config vllm \
   --reasoning-parser qwen3 \
   --structured-outputs-config.enable_in_reasoning=True \
   "$@"

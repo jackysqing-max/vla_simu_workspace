@@ -1,0 +1,325 @@
+OBS 录制顺序执行指南
+====================
+
+工作目录：
+
+  cd /home/siqin/ros2_workspaces/humble/ros2_pybullet_ws/docs
+
+通用规则：
+
+  1. 每录一段前，先执行：
+
+       ./recording_scripts/00_stop_recording_stack.sh
+
+  2. 开始 OBS 录制。
+  3. 执行当前段落的启动命令。
+  4. 录到需要的画面后，停止 OBS。
+  5. 再执行：
+
+       ./recording_scripts/00_stop_recording_stack.sh
+
+  6. 进入下一段。
+
+
+建议最终 GIF 文件名
+-------------------
+
+  01_llm_task_decomposition.gif
+  02_prompt_to_sam3.gif
+  03_sam3_gms_keypoint.gif
+  04_robot_line_trajectory.gif
+  05_robot_circle_trajectory_success.gif
+  06_sam3_prompt_segmentation.gif
+  07_cube_following.gif
+  08_medical_instrument_sorting.gif
+  09_keypoint_jitter_limitation.gif
+
+
+阶段 1：LLM 任务分解与 prompt 传递
+---------------------------------
+
+录制目标：
+
+  展示自然语言任务如何被 LLM 分解为 plan_json，
+  并把目标 object / prompt 传递给 SAM3。
+
+建议 OBS 画面：
+
+  - 终端输出
+  - /llm_task/status
+  - /llm_task/plan_json
+  - /sam3/active_prompt
+  - 可选：PyBullet GUI，显示整齐排列的银灰色器械和 Franka 抓手
+
+执行顺序：
+
+  cd /home/siqin/ros2_workspaces/humble/ros2_pybullet_ws/docs
+
+  ./recording_scripts/00_stop_recording_stack.sh
+
+  ENABLE_GRIPPER=true \
+  GRIPPER_MODEL=franka_hand \
+  ./recording_scripts/01a_llm_prompt_stack_start.sh
+
+如果要单独开 topic echo 窗口，新开终端执行：
+
+  cd /home/siqin/ros2_workspaces/humble/ros2_pybullet_ws
+  source /opt/ros/humble/setup.bash
+  source install/setup.bash
+  ros2 topic echo /llm_task/status
+
+再开一个终端：
+
+  cd /home/siqin/ros2_workspaces/humble/ros2_pybullet_ws
+  source /opt/ros/humble/setup.bash
+  source install/setup.bash
+  ros2 topic echo /llm_task/plan_json
+
+再开一个终端：
+
+  cd /home/siqin/ros2_workspaces/humble/ros2_pybullet_ws
+  source /opt/ros/humble/setup.bash
+  source install/setup.bash
+  ros2 topic echo /sam3/active_prompt
+
+OBS 开始录制后，发送任务：
+
+  cd /home/siqin/ros2_workspaces/humble/ros2_pybullet_ws/docs
+
+  ./recording_scripts/01b_llm_prompt_send_task.sh \
+    "pick up the left silver surgical instrument and then release it"
+
+录到 plan_json 和 prompt handoff 后停止：
+
+  ./recording_scripts/00_stop_recording_stack.sh
+
+
+阶段 2：视觉感知，SAM3 + GMS keypoint
+------------------------------------
+
+录制目标：
+
+  展示 prompt 后的 SAM3 mask、GMS/keypoint 选择和 keypoint overlay。
+  这一段默认放大 SAM3 Mask / SAM3 Keypoint 两个窗口，并关闭点云窗口。
+
+建议 OBS 画面：
+
+  - SAM3 Mask 窗口
+  - SAM3 Keypoint / overlay 窗口
+  - 可选：PyBullet GUI
+
+执行顺序：
+
+  cd /home/siqin/ros2_workspaces/humble/ros2_pybullet_ws/docs
+
+  ./recording_scripts/00_stop_recording_stack.sh
+
+  ./recording_scripts/02_visual_sam3_gms_recording.sh \
+    "locate the left silver surgical instrument"
+
+录到 mask 和 keypoint overlay 后停止：
+
+  ./recording_scripts/00_stop_recording_stack.sh
+
+
+阶段 3：机械臂笛卡尔直线轨迹
+---------------------------
+
+录制目标：
+
+  展示基础机械臂运动 demo：末端沿直线往返运动。
+
+建议 OBS 画面：
+
+  - PyBullet GUI
+  - 可选：RobotMonitor
+
+执行顺序：
+
+  cd /home/siqin/ros2_workspaces/humble/ros2_pybullet_ws/docs
+
+  ./recording_scripts/00_stop_recording_stack.sh
+
+  ./recording_scripts/05_robot_line_trajectory_recording.sh
+
+录到至少一个往返周期后停止：
+
+  ./recording_scripts/00_stop_recording_stack.sh
+
+
+阶段 4：机械臂笛卡尔圆形轨迹，成功示例
+-------------------------------------
+
+录制目标：
+
+  展示修正后的笛卡尔圆形轨迹规划。
+  这一段默认使用 position mode，更适合展示干净的圆形 IK 轨迹。
+
+建议 OBS 画面：
+
+  - PyBullet GUI
+  - 可选：RobotMonitor
+
+执行顺序：
+
+  cd /home/siqin/ros2_workspaces/humble/ros2_pybullet_ws/docs
+
+  ./recording_scripts/00_stop_recording_stack.sh
+
+  ./recording_scripts/06_robot_circle_trajectory_recording.sh
+
+录到至少一个完整圆后停止：
+
+  ./recording_scripts/00_stop_recording_stack.sh
+
+如果想验证实际末端轨迹是否接近圆，可在 demo 运行时另开终端执行：
+
+  cd /home/siqin/ros2_workspaces/humble/ros2_pybullet_ws/docs
+  source /opt/ros/humble/setup.bash
+  source /home/siqin/ros2_workspaces/humble/ros2_pybullet_ws/install/setup.bash
+  python3 recording_scripts/validate_iiwa_circle_ee.py \
+    --plane xy \
+    --expected-radius 0.035 \
+    --duration-sec 14 \
+    --warmup-sec 1
+
+
+阶段 5：单独 SAM3 prompt 分割测试
+---------------------------------
+
+录制目标：
+
+  单独展示 prompt-based segmentation。
+  适合放进 PPT 说明视觉模块可以由文本 prompt 驱动。
+
+建议 OBS 画面：
+
+  - SAM3 Mask
+  - SAM3 Keypoint / overlay
+  - 可选：PyBullet GUI
+
+执行顺序：
+
+  cd /home/siqin/ros2_workspaces/humble/ros2_pybullet_ws/docs
+
+  ./recording_scripts/00_stop_recording_stack.sh
+
+  ./recording_scripts/07_sam3_prompt_segmentation_recording.sh \
+    "left silver surgical instrument"
+
+也可以换成：
+
+  ./recording_scripts/07_sam3_prompt_segmentation_recording.sh \
+    "red cube"
+
+录到 mask 稳定后停止：
+
+  ./recording_scripts/00_stop_recording_stack.sh
+
+
+阶段 6：方块跟随 demo
+--------------------
+
+录制目标：
+
+  展示旧的 cube following 链路：
+  SAM3 / RGB-D keypoint 驱动机械臂 hover/follow。
+
+建议 OBS 画面：
+
+  - PyBullet GUI
+  - SAM3 Mask
+  - Keypoint overlay
+
+执行顺序：
+
+  cd /home/siqin/ros2_workspaces/humble/ros2_pybullet_ws/docs
+
+  ./recording_scripts/00_stop_recording_stack.sh
+
+  ./recording_scripts/08_cube_following_recording.sh \
+    "red cube"
+
+录到机械臂跟随方块后停止：
+
+  ./recording_scripts/00_stop_recording_stack.sh
+
+
+阶段 7：当前医疗器械分拣 / 抓取释放 demo
+---------------------------------------
+
+录制目标：
+
+  展示当前主线任务：
+  left silver surgical instrument 的 approach、grasp、lift、release。
+
+建议 OBS 画面：
+
+  - PyBullet GUI
+  - 可选：SAM3 keypoint overlay
+
+执行顺序：
+
+  cd /home/siqin/ros2_workspaces/humble/ros2_pybullet_ws/docs
+
+  ./recording_scripts/00_stop_recording_stack.sh
+
+  # 注意变量名是 GRIPPER_MODEL，不是 VGRIPPER_MODEL。
+  # 录制脚本默认启用 Franka hand、keypoint attach、实际手爪中心对齐、主轴姿态修正，
+  # 并在抓取遮挡时短时间使用最近一次有效 keypoint。
+  GRIPPER_MODEL=franka_hand \
+  ./recording_scripts/09_medical_instrument_sorting_recording.sh \
+    "pick up the left silver surgical instrument and then release it"
+
+录到完整抓取释放后停止：
+
+  ./recording_scripts/00_stop_recording_stack.sh
+
+
+阶段 8：当前限制，keypoint 跳变导致跟随不稳定
+--------------------------------------------
+
+录制目标：
+
+  诚实展示当前 limitation：
+  最新 demo 中 keypoint / GMS candidate 仍可能跳变，
+  导致 hover/follow 不稳定。
+
+建议 OBS 画面：
+
+  - PyBullet GUI
+  - SAM3 Keypoint / overlay
+  - 如果画面允许，可同时录 topic/log 终端
+
+执行顺序：
+
+  cd /home/siqin/ros2_workspaces/humble/ros2_pybullet_ws/docs
+
+  ./recording_scripts/00_stop_recording_stack.sh
+
+  ./recording_scripts/10_keypoint_jitter_limitation_recording.sh \
+    "move above the left silver surgical instrument"
+
+录到 keypoint 跳变和跟随抖动后停止：
+
+  ./recording_scripts/00_stop_recording_stack.sh
+
+
+PPT 中的推荐讲述顺序
+-------------------
+
+第一页：当前工作成果
+
+  1. LLM task decomposition
+  2. prompt handoff to SAM3
+  3. SAM3 + GMS keypoint
+  4. robot line / circle trajectory
+  5. medical instrument grasp and release
+
+第二页：后续工作
+
+  1. keypoint candidate memory，降低跳变
+  2. plane normal / tangent stabilization
+  3. approach / grasp 阶段冻结 keypoint
+  4. 更稳定的 closed-loop visual servoing
+  5. 更多器械类别和更完整的 sorting pipeline

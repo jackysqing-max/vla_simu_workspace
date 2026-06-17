@@ -120,6 +120,37 @@ To run the same demo against the local Qwen3 backend:
 LLM_BACKEND=qwen3_local ./start_llm_rekep_demo.sh start
 ```
 
+To run the same LLM/SAM/RGB-D chain in a more medical-style tabletop scene:
+
+```bash
+./start_medical_llm_demo.sh start
+./start_medical_llm_demo.sh task "inspect the red entry point and then the curved needle"
+```
+
+This uses the `medical` PyBullet scene preset with a sterile drape, tissue
+phantom, entry-point marker, warning region, gauze, forceps, scalpel, and a
+curved suture needle approximation.
+
+To run an isolated medical grasping variant with a simple parallel-jaw gripper
+attached to the iiwa wrist:
+
+```bash
+./start_medical_grasp_demo.sh start
+./start_medical_grasp_demo.sh task "pick up the blue grasp handle and then release it"
+```
+
+This variant uses `SIM_SCENE_PRESET=medical_grasp`, enables
+`ENABLE_GRIPPER=true`, and adds `grasp_target` / `release_gripper` plan actions.
+It defaults to staged single-GPU execution: local Qwen3 first produces the JSON
+task plan, including segmentation-friendly `target_prompt` values and action
+order; the launcher then stops Qwen3 to free GPU memory, starts SAM3, and the
+executor sends each `target_prompt` to `/sam3/prompt` step by step. Simulated RGB
+images are segmented by `sam3_mask_node`, `/sam3/mask` and `/sam3/score` feed
+mask-depth fusion, and the resulting `/perception/keypoint_3d` drives tracking
+and execution. The grasp is simulated by closing the gripper and creating a
+PyBullet fixed constraint to the nearest graspable object within the configured
+radius.
+
 To run the live RealSense RGB-D keypoint pipeline with local overlay visualization:
 
 ```bash

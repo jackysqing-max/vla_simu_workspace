@@ -129,6 +129,9 @@ class LlmTaskPlanner(Node):
         self.declare_parameter("max_output_tokens", 512)
         self.declare_parameter("extra_request_body_json", "{}")
         self.declare_parameter("request_timeout_sec", 45.0)
+        self.declare_parameter("open_vocabulary_targets", False)
+        self.declare_parameter("enable_grasp_actions", False)
+        self.declare_parameter("allow_local_fallback", True)
 
         self.instruction_topic = str(self.get_parameter("instruction_topic").value)
         self.plan_topic = str(self.get_parameter("plan_topic").value)
@@ -148,6 +151,13 @@ class LlmTaskPlanner(Node):
             str(self.get_parameter("extra_request_body_json").value)
         )
         self.request_timeout_sec = float(self.get_parameter("request_timeout_sec").value)
+        self.open_vocabulary_targets = bool(
+            self.get_parameter("open_vocabulary_targets").value
+        )
+        self.enable_grasp_actions = bool(self.get_parameter("enable_grasp_actions").value)
+        self.allow_local_fallback = bool(
+            self.get_parameter("allow_local_fallback").value
+        )
         self.latest_scene_registry = {"target_frame": "world", "updated_at_sec": 0.0, "objects": []}
 
         self.pub_plan = self.create_publisher(String, self.plan_topic, 10)
@@ -265,6 +275,62 @@ class LlmTaskPlanner(Node):
         self.latest_scene_registry = scene_registry_from_json(msg.data)
 
     def _system_prompt(self) -> str:
+        if self.open_vocabulary_targets:
+            if self.enable_grasp_actions:
+                return (
+                    "You are a tabletop robot task planner. "
+                    "Convert the user's instruction into a short executable JSON task plan. "
+                    "Return JSON only, with no markdown and no extra prose. "
+                    "The robot can do four things: "
+                    "1) hover above one visible tabletop object, "
+                    "2) grasp one target object by closing a parallel gripper, "
+                    "3) release the gripper, "
+                    "4) wait for a short duration. "
+                    "Use action='hover_target' when the robot should move above or inspect an object. "
+                    "Use action='grasp_target' when the robot should pick up or hold an object. "
+                    "Use action='release_gripper' when the robot should open the gripper or drop/release. "
+                    "Use action='wait' when the robot should pause. "
+                    "For pick-and-place or sorting tasks, always use this order: "
+                    "grasp_target for the object, then hover_target for the destination container/tray center, "
+                    "then release_gripper. Never release before moving above the destination. "
+                    "For hover_target and grasp_target steps, set target_prompt to a concise object phrase "
+                    "that can be sent directly to a text-conditioned segmentation model, such as "
+                    "left silver surgical instrument, right silver surgical instrument, silver surgical instrument, white sorting tray center, gauze pad, curved needle, or red entry point. "
+                    "Preserve spatial qualifiers such as left, middle, right, front, and back when the user includes them. "
+                    "Every step must include step_index starting at 1, target_prompt, description, "
+                    "success_radius_m, dwell_sec, and wait_sec. "
+                    "For grasp_target steps, keep dwell_sec around 1.0 and wait_sec=0.0. "
+                    "For release_gripper and wait steps, set target_prompt='' and success_radius_m=0.0. "
+                    "Use the scene summary as helpful context, but if it is empty or does not yet list "
+                    "the requested object, still create target steps from the user's object phrase because "
+                    "perception will ground the prompt during execution. "
+                    "Do not invent fine manipulation or cutting actions; represent them as hover, grasp, "
+                    "release, and wait primitives."
+                )
+            return (
+                "You are a tabletop robot task planner. "
+                "Convert the user's instruction into a short executable JSON task plan. "
+                "Return JSON only, with no markdown and no extra prose. "
+                "The robot can only do two things: "
+                "1) hover above one visible tabletop object, "
+                "2) wait for a short duration. "
+                "Use action='hover_target' when the step should move above an object. "
+                "Use action='wait' when the robot should pause. "
+                "For hover steps, set target_prompt to a concise object phrase that can be sent "
+                "directly to a text-conditioned segmentation model, such as mug, scissors, bottle, "
+                "phone, book, or blue cup. "
+                "Every hover_target step must include step_index starting at 1, "
+                "description, success_radius_m=0.0, dwell_sec=1.0, and wait_sec=0.0. "
+                "Every wait step must include target_prompt='', success_radius_m=0.0, "
+                "dwell_sec=0.0, and wait_sec set to the pause duration. "
+                "Prefer short noun phrases, usually one to four words, and avoid full sentences. "
+                "Use the scene summary as helpful context, but if it is empty or does not yet "
+                "list the requested object, still create a hover_target step from the user's "
+                "object phrase because perception will ground the prompt during execution. "
+                "If the user asks for unsupported actions like grasping or stacking, "
+                "decompose only the observable hover sequence and mention the limitation in planning_notes. "
+            )
+
         supported_targets = ", ".join(SUPPORTED_TARGET_PROMPTS)
         return (
             "You are a tabletop robot task planner. "
@@ -309,23 +375,52 @@ class LlmTaskPlanner(Node):
         else:
             plan_text = _extract_chat_completion_text(response_json)
 
-        return sanitize_plan(_extract_json_object(plan_text))
+        return sanitize_plan(
+            _extract_json_object(plan_text),
+            allow_open_vocabulary=self.open_vocabulary_targets,
+            allow_grasp_actions=self.enable_grasp_actions,
+        )
 
     def _plan_with_fallback(self, instruction: str) -> tuple[dict, bool]:
         try:
             plan = self._request_plan(instruction)
             if plan["steps"]:
                 return plan, False
+            if not self.allow_local_fallback:
+                self.get_logger().error(
+                    "[PLAN] LLM returned no executable steps after sanitization; local fallback is disabled"
+                )
+                return {
+                    "task_summary": instruction,
+                    "planning_notes": "LLM returned no executable steps and local fallback is disabled.",
+                    "steps": [],
+                }, False
             self.get_logger().warning(
                 "[PLAN] LLM returned no executable steps after sanitization; trying local fallback"
             )
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="ignore")
             self.get_logger().error(f"[PLAN] HTTPError {exc.code}: {detail}")
+            if not self.allow_local_fallback:
+                return {
+                    "task_summary": instruction,
+                    "planning_notes": f"LLM HTTPError {exc.code}; local fallback is disabled.",
+                    "steps": [],
+                }, False
         except Exception as exc:
             self.get_logger().error(f"[PLAN] failed: {exc}")
+            if not self.allow_local_fallback:
+                return {
+                    "task_summary": instruction,
+                    "planning_notes": f"LLM planning failed: {exc}; local fallback is disabled.",
+                    "steps": [],
+                }, False
 
-        fallback_plan = infer_plan_from_instruction(instruction)
+        fallback_plan = infer_plan_from_instruction(
+            instruction,
+            allow_open_vocabulary=self.open_vocabulary_targets,
+            allow_grasp_actions=self.enable_grasp_actions,
+        )
         if fallback_plan["steps"]:
             self.get_logger().warning(
                 f"[PLAN] using local fallback with {len(fallback_plan['steps'])} steps"

@@ -45,10 +45,13 @@ protected:
 private:
     Ui::MainWindow *ui;
     Widget *widgets[4];
+    Widget *keypoint_widget_;
     QLabel *logging_message_;
     QLabel *keypoint_message_;
+    QLabel *candidate_message_;
     unsigned int sampleCount = 50000;
     QList<QPointF> m_buffer[4][7];
+    QList<QPointF> keypoint_buffer_[3];
     double time_width = 10;
     QTimer timer;
     std::vector<std::vector<double>> frames;
@@ -58,13 +61,16 @@ private:
     std::shared_ptr<std::thread> tt;
     std::mutex mtx;
     rclcpp::Time start_time_;
+    rclcpp::Time keypoint_start_time_;
     rclcpp::Node::SharedPtr node_;
     rclcpp::Subscription<robot_control_msgs::msg::RobotState>::SharedPtr subscription_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr prompt_subscription_;
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr valid_subscription_;
     rclcpp::Subscription<geometry_msgs::msg::PointStamped>::SharedPtr keypoint_subscription_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr candidate_subscription_;
     bool first_time_;
     std::string current_prompt_;
+    std::string current_candidate_summary_;
     std::string keypoint_frame_id_;
     double keypoint_x_ = 0.0;
     double keypoint_y_ = 0.0;
@@ -76,5 +82,8 @@ private:
     double keypoint_timeout_sec_ = 1.0;
     rclcpp::Time last_keypoint_log_time_;
     bool have_keypoint_log_time_ = false;
+    rclcpp::Time last_candidate_log_time_;
+    bool have_candidate_log_time_ = false;
+    void pushKeypointSample(double t, double x, double y, double z);
 };
 #endif // MAINWINDOW_H

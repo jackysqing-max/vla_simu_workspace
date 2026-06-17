@@ -1,6 +1,7 @@
 """Fuse SAM3 mask output with depth to produce a stable 3D keypoint."""
 
 from collections import deque
+import math
 import threading
 import time
 
@@ -12,8 +13,8 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo, Image
-from std_msgs.msg import Float32
-from geometry_msgs.msg import PointStamped
+from std_msgs.msg import Float32, String
+from geometry_msgs.msg import PointStamped, Vector3Stamped
 from tf2_ros import Buffer, TransformListener
 
 from perception_geometry.pointcloud_ops import (
@@ -123,6 +124,7 @@ def select_top_surface_point(
     *,
     top_band_m: float,
     min_fraction: float,
+    surface_percentile: float,
 ):
     """Estimate the center of the visible top surface in camera coordinates.
 
@@ -135,14 +137,22 @@ def select_top_surface_point(
 
     xyz_world = transform_points(cam_to_world, xyz_cam)
     z_world = xyz_world[:, 2]
-    z_max = float(np.max(z_world))
+    finite_mask = np.isfinite(z_world)
+    if not np.any(finite_mask):
+        return None, None, np.zeros((0, 3), dtype=np.float32)
 
-    top_mask = z_world >= z_max - max(float(top_band_m), 1e-4)
+    xyz_world = xyz_world[finite_mask]
+    z_world = z_world[finite_mask]
+
+    band_m = max(float(top_band_m), 1e-4)
+    percentile = float(np.clip(surface_percentile, 50.0, 99.5))
+    z_ref = float(np.percentile(z_world, percentile))
+    top_mask = (z_world >= z_ref - band_m) & (z_world <= z_ref + 2.0 * band_m)
     min_count = max(8, int(np.ceil(float(min_fraction) * xyz_world.shape[0])))
 
     if int(np.count_nonzero(top_mask)) < min_count:
         keep_count = min(min_count, xyz_world.shape[0])
-        top_indices = np.argsort(z_world)[-keep_count:]
+        top_indices = np.argsort(np.abs(z_world - z_ref))[:keep_count]
     else:
         top_indices = np.flatnonzero(top_mask)
 
@@ -151,7 +161,7 @@ def select_top_surface_point(
         [
             float(np.median(top_world[:, 0])),
             float(np.median(top_world[:, 1])),
-            float(np.mean(top_world[:, 2])),
+            float(np.median(top_world[:, 2])),
         ],
         dtype=np.float64,
     )
@@ -159,6 +169,107 @@ def select_top_surface_point(
     world_to_cam = np.linalg.inv(cam_to_world)
     center_cam = transform_points(world_to_cam, center_world.reshape(1, 3))[0]
     return center_cam.astype(np.float32), center_world.astype(np.float32), top_world
+
+
+def normalize_axis_yaw(yaw_rad: float) -> float:
+    """Normalize an undirected principal-axis yaw into [-pi/2, pi/2]."""
+    yaw = math.atan2(math.sin(float(yaw_rad)), math.cos(float(yaw_rad)))
+    if yaw > math.pi / 2.0:
+        yaw -= math.pi
+    elif yaw < -math.pi / 2.0:
+        yaw += math.pi
+    return yaw
+
+
+def estimate_principal_yaw_world(points_world: np.ndarray):
+    """Estimate target long-axis yaw from masked world-frame points."""
+    if points_world is None or points_world.shape[0] < 8:
+        return None, 0
+    xy = np.asarray(points_world[:, :2], dtype=np.float64)
+    finite = np.all(np.isfinite(xy), axis=1)
+    xy = xy[finite]
+    if xy.shape[0] < 8:
+        return None, int(xy.shape[0])
+    centered = xy - np.median(xy, axis=0, keepdims=True)
+    cov = centered.T @ centered / max(xy.shape[0] - 1, 1)
+    try:
+        eigvals, eigvecs = np.linalg.eigh(cov)
+    except np.linalg.LinAlgError:
+        return None, int(xy.shape[0])
+    axis = eigvecs[:, int(np.argmax(eigvals))]
+    yaw = normalize_axis_yaw(math.atan2(float(axis[1]), float(axis[0])))
+    return yaw, int(xy.shape[0])
+
+
+def normalize_vector(vector: np.ndarray):
+    vec = np.asarray(vector, dtype=np.float64).reshape(3)
+    norm = float(np.linalg.norm(vec))
+    if norm <= 1e-9 or not np.all(np.isfinite(vec)):
+        return None
+    return vec / norm
+
+
+def estimate_target_plane_world(
+    points_world: np.ndarray,
+    keypoint_world: np.ndarray,
+    *,
+    local_radius_m: float,
+    min_points: int,
+    max_samples: int,
+    normal_reference: np.ndarray,
+):
+    """Fit a local object plane around the selected keypoint using PCA."""
+    if points_world is None or points_world.shape[0] < max(int(min_points), 3):
+        return None
+    points = np.asarray(points_world, dtype=np.float64)
+    finite = np.all(np.isfinite(points), axis=1)
+    points = points[finite]
+    if points.shape[0] < max(int(min_points), 3):
+        return None
+
+    keypoint = np.asarray(keypoint_world, dtype=np.float64).reshape(3)
+    radius = max(float(local_radius_m), 1e-4)
+    distances_xy = np.linalg.norm(points[:, :2] - keypoint[None, :2], axis=1)
+    local = points[distances_xy <= radius]
+    if local.shape[0] < max(int(min_points), 3):
+        distances_3d = np.linalg.norm(points - keypoint[None, :], axis=1)
+        keep_count = min(max(int(min_points), 3), points.shape[0])
+        local = points[np.argsort(distances_3d)[:keep_count]]
+
+    if max_samples > 0 and local.shape[0] > max_samples:
+        keep = np.linspace(0, local.shape[0] - 1, num=max_samples, dtype=np.int32)
+        local = local[keep]
+    if local.shape[0] < max(int(min_points), 3):
+        return None
+
+    center = np.median(local, axis=0)
+    centered = local - center[None, :]
+    cov = centered.T @ centered / max(local.shape[0] - 1, 1)
+    try:
+        eigvals, eigvecs = np.linalg.eigh(cov)
+    except np.linalg.LinAlgError:
+        return None
+
+    normal = normalize_vector(eigvecs[:, int(np.argmin(eigvals))])
+    tangent = normalize_vector(eigvecs[:, int(np.argmax(eigvals))])
+    reference = normalize_vector(normal_reference)
+    if normal is None or tangent is None:
+        return None
+    if reference is not None and float(np.dot(normal, reference)) < 0.0:
+        normal = -normal
+
+    tangent = tangent - float(np.dot(tangent, normal)) * normal
+    tangent = normalize_vector(tangent)
+    if tangent is None:
+        return None
+    rms = float(np.sqrt(np.mean((centered @ normal) ** 2)))
+    return {
+        "center": center.astype(np.float32),
+        "normal": normal.astype(np.float32),
+        "tangent": tangent.astype(np.float32),
+        "count": int(local.shape[0]),
+        "rms": rms,
+    }
 
 
 def draw_overlay(
@@ -239,6 +350,8 @@ class MaskDepthFusionNode(Node):
         self.declare_parameter("camera_info_topic", "/sim/camera/color/camera_info")
         self.declare_parameter("score_topic", "/sam3/score")
         self.declare_parameter("overlay_topic", "/perception/keypoint_overlay")
+        self.declare_parameter("candidate_text_topic", "/perception/keypoint_candidates_text")
+        self.declare_parameter("candidate_text_limit", 4)
         self.declare_parameter("depth_scale", 0.001)
         self.declare_parameter("min_score", 0.0)
         self.declare_parameter("max_frame_age_sec", 0.2)
@@ -251,8 +364,20 @@ class MaskDepthFusionNode(Node):
         self.declare_parameter("cluster_rgb_weight", 0.35)
         self.declare_parameter("cluster_seed", 0)
         self.declare_parameter("target_frame", "world")
+        self.declare_parameter("use_top_surface_estimator", True)
         self.declare_parameter("top_surface_band_m", 0.012)
         self.declare_parameter("top_surface_min_fraction", 0.15)
+        self.declare_parameter("top_surface_percentile", 92.0)
+        self.declare_parameter("enable_keypoint_stabilizer", True)
+        self.declare_parameter("keypoint_filter_alpha", 0.25)
+        self.declare_parameter("keypoint_jump_reset_m", 0.18)
+        self.declare_parameter("keypoint_jump_hold_frames", 5)
+        self.declare_parameter("candidate_lock_radius_m", 0.08)
+        self.declare_parameter("invalid_reset_frames", 30)
+        self.declare_parameter("plane_cluster_radius_m", 0.10)
+        self.declare_parameter("plane_min_points", 24)
+        self.declare_parameter("plane_max_samples", 1024)
+        self.declare_parameter("plane_normal_reference", [0.0, 0.0, 1.0])
 
         self.mask_topic = self.get_parameter("mask_topic").value
         self.color_topic = self.get_parameter("color_topic").value
@@ -260,6 +385,10 @@ class MaskDepthFusionNode(Node):
         self.camera_info_topic = self.get_parameter("camera_info_topic").value
         self.score_topic = self.get_parameter("score_topic").value
         self.overlay_topic = self.get_parameter("overlay_topic").value
+        self.candidate_text_topic = str(self.get_parameter("candidate_text_topic").value)
+        self.candidate_text_limit = max(
+            1, int(self.get_parameter("candidate_text_limit").value)
+        )
         self.depth_scale = float(self.get_parameter("depth_scale").value)
         self.min_score = float(self.get_parameter("min_score").value)
         self.max_frame_age_sec = float(self.get_parameter("max_frame_age_sec").value)
@@ -274,10 +403,39 @@ class MaskDepthFusionNode(Node):
         self.cluster_rgb_weight = float(self.get_parameter("cluster_rgb_weight").value)
         self.cluster_seed = int(self.get_parameter("cluster_seed").value)
         self.target_frame = str(self.get_parameter("target_frame").value)
+        self.use_top_surface_estimator = bool(
+            self.get_parameter("use_top_surface_estimator").value
+        )
         self.top_surface_band_m = float(self.get_parameter("top_surface_band_m").value)
         self.top_surface_min_fraction = float(
             self.get_parameter("top_surface_min_fraction").value
         )
+        self.top_surface_percentile = float(self.get_parameter("top_surface_percentile").value)
+        self.enable_keypoint_stabilizer = bool(
+            self.get_parameter("enable_keypoint_stabilizer").value
+        )
+        self.keypoint_filter_alpha = float(self.get_parameter("keypoint_filter_alpha").value)
+        self.keypoint_jump_reset_m = float(self.get_parameter("keypoint_jump_reset_m").value)
+        self.keypoint_jump_hold_frames = max(
+            0,
+            int(self.get_parameter("keypoint_jump_hold_frames").value),
+        )
+        self.candidate_lock_radius_m = float(self.get_parameter("candidate_lock_radius_m").value)
+        self.invalid_reset_frames = max(0, int(self.get_parameter("invalid_reset_frames").value))
+        self.plane_cluster_radius_m = float(self.get_parameter("plane_cluster_radius_m").value)
+        self.plane_min_points = max(3, int(self.get_parameter("plane_min_points").value))
+        self.plane_max_samples = int(self.get_parameter("plane_max_samples").value)
+        self.plane_normal_reference = np.array(
+            [float(value) for value in self.get_parameter("plane_normal_reference").value][
+                :3
+            ],
+            dtype=np.float64,
+        )
+        if self.plane_normal_reference.shape[0] < 3:
+            self.plane_normal_reference = np.pad(
+                self.plane_normal_reference,
+                (0, 3 - self.plane_normal_reference.shape[0]),
+            )
 
         qos = QoSProfile(depth=1)
         qos.reliability = ReliabilityPolicy.BEST_EFFORT
@@ -299,6 +457,17 @@ class MaskDepthFusionNode(Node):
         self.pub_keypoint_x = self.create_publisher(Float32, "/perception/keypoint_3d/x", 10)
         self.pub_keypoint_y = self.create_publisher(Float32, "/perception/keypoint_3d/y", 10)
         self.pub_keypoint_z = self.create_publisher(Float32, "/perception/keypoint_3d/z", 10)
+        self.pub_object_yaw = self.create_publisher(Float32, "/perception/object_yaw_rad", 10)
+        self.pub_object_plane_normal = self.create_publisher(
+            Vector3Stamped,
+            "/perception/object_plane_normal",
+            10,
+        )
+        self.pub_object_plane_tangent = self.create_publisher(
+            Vector3Stamped,
+            "/perception/object_plane_tangent",
+            10,
+        )
         self.pub_points = self.create_publisher(
             type(xyz_to_pointcloud2(np.zeros((0, 3), dtype=np.float32), CameraInfo().header)),
             "/perception/masked_points",
@@ -311,6 +480,11 @@ class MaskDepthFusionNode(Node):
         )
         self.pub_valid = self.create_publisher(type(make_bool_msg(True)), "/perception/valid", 10)
         self.pub_overlay = self.create_publisher(Image, self.overlay_topic, 10)
+        self.pub_candidate_text = self.create_publisher(
+            String,
+            self.candidate_text_topic,
+            10,
+        )
 
         self.lock = threading.Lock()
         self.color_buffer = deque()
@@ -320,6 +494,9 @@ class MaskDepthFusionNode(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self._last_status_log_time = 0.0
+        self._stable_keypoint_xyz = None
+        self._held_jump_count = 0
+        self._invalid_count = 0
 
         self.get_logger().info("mask_depth_fusion_node started")
 
@@ -338,10 +515,98 @@ class MaskDepthFusionNode(Node):
         self.pub_keypoint_y.publish(make_float32_msg(y))
         self.pub_keypoint_z.publish(make_float32_msg(z))
 
-    def publish_invalid(self):
+    def publish_plane_vector(self, publisher, vector, header):
+        msg = Vector3Stamped()
+        msg.header.stamp = header.stamp
+        msg.header.frame_id = self.target_frame
+        msg.vector.x = float(vector[0])
+        msg.vector.y = float(vector[1])
+        msg.vector.z = float(vector[2])
+        publisher.publish(msg)
+
+    def reset_stabilizer(self):
+        self._stable_keypoint_xyz = None
+        self._held_jump_count = 0
+        self._invalid_count = 0
+
+    def select_candidate_index(self, candidates_xyz: np.ndarray, reference_xyz: np.ndarray):
+        if candidates_xyz.shape[0] == 0:
+            return None, "none"
+
+        if self._stable_keypoint_xyz is not None and np.all(np.isfinite(self._stable_keypoint_xyz)):
+            previous = self._stable_keypoint_xyz.astype(np.float32)
+            distances = np.linalg.norm(candidates_xyz - previous[None, :], axis=1)
+            nearest_index = int(np.argmin(distances))
+            nearest_distance = float(distances[nearest_index])
+            if self.candidate_lock_radius_m <= 0.0 or nearest_distance <= self.candidate_lock_radius_m:
+                return nearest_index, f"locked:{nearest_distance:.3f}m"
+
+        primary_index = select_primary_candidate(candidates_xyz, reference_xyz)
+        if primary_index is None:
+            return None, "none"
+        return primary_index, "centroid"
+
+    def stabilize_keypoint(self, raw_xyz: np.ndarray):
+        raw = np.asarray(raw_xyz, dtype=np.float32)
+        if not self.enable_keypoint_stabilizer:
+            self._stable_keypoint_xyz = raw
+            self._held_jump_count = 0
+            return raw, "raw", 0.0
+
+        if self._stable_keypoint_xyz is None or not np.all(np.isfinite(self._stable_keypoint_xyz)):
+            self._stable_keypoint_xyz = raw
+            self._held_jump_count = 0
+            return raw, "init", 0.0
+
+        previous = self._stable_keypoint_xyz.astype(np.float32)
+        jump_m = float(np.linalg.norm(raw - previous))
+        if (
+            self.keypoint_jump_reset_m > 0.0
+            and jump_m > self.keypoint_jump_reset_m
+            and self._held_jump_count < self.keypoint_jump_hold_frames
+        ):
+            self._held_jump_count += 1
+            return previous, f"hold_jump:{self._held_jump_count}", jump_m
+
+        alpha = float(np.clip(self.keypoint_filter_alpha, 0.0, 1.0))
+        stable = previous + alpha * (raw - previous)
+        self._stable_keypoint_xyz = stable.astype(np.float32)
+        self._held_jump_count = 0
+        return self._stable_keypoint_xyz, "filtered", jump_m
+
+    def publish_invalid(self, *, clear_candidates: bool = True):
         nan = float("nan")
         self.publish_keypoint_xyz(nan, nan, nan)
         self.pub_valid.publish(make_bool_msg(False))
+        if clear_candidates:
+            self._invalid_count += 1
+            if self.invalid_reset_frames == 0 or self._invalid_count >= self.invalid_reset_frames:
+                self.reset_stabilizer()
+                self.publish_candidate_text(None, None)
+
+    def publish_candidate_text(self, header, candidates_xyz: np.ndarray | None):
+        msg = String()
+        frame_id = "unknown"
+        if header is not None:
+            frame_id = str(getattr(header, "frame_id", "") or "unknown")
+
+        if candidates_xyz is None or candidates_xyz.shape[0] == 0:
+            msg.data = f"Candidates[{frame_id}]: none"
+            self.pub_candidate_text.publish(msg)
+            return
+
+        limit = min(int(self.candidate_text_limit), int(candidates_xyz.shape[0]))
+        parts = [f"Candidates[{frame_id}]"]
+        for candidate_index in range(limit):
+            candidate = candidates_xyz[candidate_index]
+            parts.append(
+                f"#{candidate_index}=({float(candidate[0]):.3f},"
+                f"{float(candidate[1]):.3f},{float(candidate[2]):.3f})"
+            )
+        if candidates_xyz.shape[0] > limit:
+            parts.append(f"... total={int(candidates_xyz.shape[0])}")
+        msg.data = " ".join(parts)
+        self.pub_candidate_text.publish(msg)
 
     def publish_overlay(
         self,
@@ -535,13 +800,22 @@ class MaskDepthFusionNode(Node):
             self.publish_invalid()
             return
 
-        primary_index = select_primary_candidate(candidates_xyz, xyz_samples)
+        self.publish_candidate_text(msg.header, candidates_xyz)
+
+        primary_index, candidate_select_state = self.select_candidate_index(
+            candidates_xyz,
+            xyz_samples,
+        )
         if primary_index is None:
             self._log_status("no primary proposal", level="warn")
             self.publish_overlay(color_pack, lines=["no primary proposal"], valid=False)
-            self.publish_invalid()
+            self.publish_invalid(clear_candidates=False)
             return
 
+        selected_candidate_xyz = candidates_xyz[primary_index]
+        cam_to_world = None
+        primary_world_xyz = None
+        top_world = np.zeros((0, 3), dtype=np.float32)
         try:
             if self.target_frame == msg.header.frame_id:
                 cam_to_world = np.eye(4, dtype=np.float64)
@@ -552,23 +826,65 @@ class MaskDepthFusionNode(Node):
                     Time(),
                 )
                 cam_to_world = transform_to_matrix(tf_msg)
-            primary_xyz, primary_world_xyz, top_world = select_top_surface_point(
-                xyz_samples,
-                cam_to_world,
-                top_band_m=self.top_surface_band_m,
-                min_fraction=self.top_surface_min_fraction,
-            )
+
+            if self.use_top_surface_estimator:
+                local_radius = max(self.candidate_lock_radius_m, self.cluster_meanshift_bandwidth_m)
+                local_xy_dist = np.linalg.norm(
+                    xyz_samples[:, :2] - selected_candidate_xyz[None, :2],
+                    axis=1,
+                )
+                local_mask = local_xy_dist <= max(local_radius, 1e-4)
+                top_input_xyz = xyz_samples[local_mask] if int(np.count_nonzero(local_mask)) >= 32 else xyz_samples
+                primary_xyz, primary_world_xyz, top_world = select_top_surface_point(
+                    top_input_xyz,
+                    cam_to_world,
+                    top_band_m=self.top_surface_band_m,
+                    min_fraction=self.top_surface_min_fraction,
+                    surface_percentile=self.top_surface_percentile,
+                )
+            else:
+                primary_xyz = selected_candidate_xyz.astype(np.float32)
+                primary_world_xyz = transform_points(cam_to_world, primary_xyz.reshape(1, 3))[0]
         except Exception as exc:
-            self.get_logger().warn(f"top-surface TF lookup failed: {exc}")
-            primary_xyz = candidates_xyz[primary_index]
+            self.get_logger().warn(f"keypoint frame/TF lookup failed: {exc}")
+            primary_xyz = selected_candidate_xyz
             primary_world_xyz = None
             top_world = np.zeros((0, 3), dtype=np.float32)
 
         if primary_xyz is None:
             self._log_status("no top-surface point", level="warn")
             self.publish_overlay(color_pack, lines=["no top-surface point"], valid=False)
-            self.publish_invalid()
+            self.publish_invalid(clear_candidates=False)
             return
+
+        raw_primary_xyz = np.asarray(primary_xyz, dtype=np.float32)
+        primary_xyz, stabilizer_state, jump_m = self.stabilize_keypoint(raw_primary_xyz)
+        if cam_to_world is not None:
+            primary_world_xyz = transform_points(cam_to_world, primary_xyz.reshape(1, 3))[0]
+
+        object_yaw_rad = None
+        object_yaw_points = 0
+        object_plane = None
+        if cam_to_world is not None:
+            yaw_points_world = top_world
+            if yaw_points_world.shape[0] < 8:
+                yaw_points_world = transform_points(cam_to_world, xyz_samples)
+            object_yaw_rad, object_yaw_points = estimate_principal_yaw_world(yaw_points_world)
+            plane_points_world = yaw_points_world
+            if plane_points_world.shape[0] < self.plane_min_points:
+                plane_points_world = transform_points(cam_to_world, xyz_samples)
+            if primary_world_xyz is not None:
+                object_plane = estimate_target_plane_world(
+                    plane_points_world,
+                    primary_world_xyz,
+                    local_radius_m=max(
+                        self.plane_cluster_radius_m,
+                        self.cluster_meanshift_bandwidth_m,
+                    ),
+                    min_points=self.plane_min_points,
+                    max_samples=self.plane_max_samples,
+                    normal_reference=self.plane_normal_reference,
+                )
 
         primary_uv = xyz_to_pixel(
             float(primary_xyz[0]),
@@ -582,7 +898,7 @@ class MaskDepthFusionNode(Node):
         if primary_uv is None:
             self._log_status("invalid primary proposal", level="warn")
             self.publish_overlay(color_pack, lines=["invalid primary proposal"], valid=False)
-            self.publish_invalid()
+            self.publish_invalid(clear_candidates=False)
             return
 
         candidate_pixels = []
@@ -604,6 +920,19 @@ class MaskDepthFusionNode(Node):
 
         self.pub_keypoint_px.publish(make_point_stamped(u, v, 0.0, msg.header))
         self.pub_keypoint_3d.publish(make_point_stamped(x, y, z, msg.header))
+        if object_yaw_rad is not None and math.isfinite(object_yaw_rad):
+            self.pub_object_yaw.publish(make_float32_msg(float(object_yaw_rad)))
+        if object_plane is not None:
+            self.publish_plane_vector(
+                self.pub_object_plane_normal,
+                object_plane["normal"],
+                msg.header,
+            )
+            self.publish_plane_vector(
+                self.pub_object_plane_tangent,
+                object_plane["tangent"],
+                msg.header,
+            )
         self.pub_candidates.publish(xyz_to_pointcloud2(candidates_xyz, msg.header))
         self.publish_keypoint_xyz(x, y, z)
         self.publish_overlay(
@@ -614,10 +943,26 @@ class MaskDepthFusionNode(Node):
             lines=[
                 f"candidates={candidates_xyz.shape[0]}",
                 f"surface_pts={top_world.shape[0]}",
+                f"candidate={candidate_select_state}",
+                f"stabilizer={stabilizer_state} jump={jump_m:.3f} m",
                 f"px=({u:.1f}, {v:.1f})",
                 f"x={x:.3f} m",
                 f"y={y:.3f} m",
                 f"z={z:.3f} m",
+                (
+                    f"yaw={math.degrees(object_yaw_rad):.1f} deg pts={object_yaw_points}"
+                    if object_yaw_rad is not None
+                    else "yaw=n/a"
+                ),
+                (
+                    "plane_n="
+                    f"({float(object_plane['normal'][0]):.2f},"
+                    f"{float(object_plane['normal'][1]):.2f},"
+                    f"{float(object_plane['normal'][2]):.2f}) "
+                    f"pts={object_plane['count']} rms={object_plane['rms']:.3f}"
+                    if object_plane is not None
+                    else "plane=n/a"
+                ),
                 (
                     f"world_z={float(primary_world_xyz[2]):.3f} m"
                     if primary_world_xyz is not None
@@ -628,13 +973,27 @@ class MaskDepthFusionNode(Node):
         )
         self._log_status(
             f"valid target score={score:.3f} keypoint=({x:.3f}, {y:.3f}, {z:.3f}) "
-            f"candidates={candidates_xyz.shape[0]}"
+            f"candidate={candidate_select_state} stabilizer={stabilizer_state} jump={jump_m:.3f} "
+            f"candidates={candidates_xyz.shape[0]} "
+            + (
+                f"yaw={math.degrees(object_yaw_rad):.1f}deg"
+                if object_yaw_rad is not None
+                else "yaw=n/a"
+            )
+            + (
+                f" plane_n=({float(object_plane['normal'][0]):.2f},"
+                f"{float(object_plane['normal'][1]):.2f},"
+                f"{float(object_plane['normal'][2]):.2f})"
+                if object_plane is not None
+                else " plane=n/a"
+            )
         )
 
         xyz = masked_depth_to_xyz(depth, mask, fx, fy, cx, cy)
         if xyz.shape[0] > 0:
             self.pub_points.publish(xyz_to_pointcloud2(xyz, msg.header))
 
+        self._invalid_count = 0
         self.pub_valid.publish(make_bool_msg(True))
 
 

@@ -32,14 +32,23 @@ def generate_launch_description():
     cluster_count = LaunchConfiguration("cluster_count")
     cluster_max_samples = LaunchConfiguration("cluster_max_samples")
     cluster_meanshift_bandwidth_m = LaunchConfiguration("cluster_meanshift_bandwidth_m")
+    use_top_surface_estimator = LaunchConfiguration("use_top_surface_estimator")
     top_surface_band_m = LaunchConfiguration("top_surface_band_m")
     top_surface_min_fraction = LaunchConfiguration("top_surface_min_fraction")
+    top_surface_percentile = LaunchConfiguration("top_surface_percentile")
+    keypoint_filter_alpha = LaunchConfiguration("keypoint_filter_alpha")
+    keypoint_jump_reset_m = LaunchConfiguration("keypoint_jump_reset_m")
+    keypoint_jump_hold_frames = LaunchConfiguration("keypoint_jump_hold_frames")
+    candidate_lock_radius_m = LaunchConfiguration("candidate_lock_radius_m")
+    invalid_reset_frames = LaunchConfiguration("invalid_reset_frames")
     overlay_topic = LaunchConfiguration("overlay_topic")
     start_overlay_viewer = LaunchConfiguration("start_overlay_viewer")
     start_robot_monitor = LaunchConfiguration("start_robot_monitor")
     monitor_keypoint_timeout_sec = LaunchConfiguration("monitor_keypoint_timeout_sec")
     viewer_window_name = LaunchConfiguration("viewer_window_name")
     viewer_refresh_hz = LaunchConfiguration("viewer_refresh_hz")
+    viewer_cloud_stride = LaunchConfiguration("viewer_cloud_stride")
+    viewer_cloud_display_max_points = LaunchConfiguration("viewer_cloud_display_max_points")
 
     return LaunchDescription(
         [
@@ -109,9 +118,18 @@ def generate_launch_description():
             DeclareLaunchArgument("cluster_count", default_value="4"),
             DeclareLaunchArgument("cluster_max_samples", default_value="512"),
             DeclareLaunchArgument("cluster_meanshift_bandwidth_m", default_value="0.04"),
+            DeclareLaunchArgument("use_top_surface_estimator", default_value="false"),
             DeclareLaunchArgument("top_surface_band_m", default_value="0.012"),
             DeclareLaunchArgument("top_surface_min_fraction", default_value="0.15"),
+            DeclareLaunchArgument("top_surface_percentile", default_value="92.0"),
+            DeclareLaunchArgument("keypoint_filter_alpha", default_value="0.18"),
+            DeclareLaunchArgument("keypoint_jump_reset_m", default_value="0.08"),
+            DeclareLaunchArgument("keypoint_jump_hold_frames", default_value="12"),
+            DeclareLaunchArgument("candidate_lock_radius_m", default_value="0.08"),
+            DeclareLaunchArgument("invalid_reset_frames", default_value="30"),
             DeclareLaunchArgument("monitor_keypoint_timeout_sec", default_value="1.0"),
+            DeclareLaunchArgument("viewer_cloud_stride", default_value="2"),
+            DeclareLaunchArgument("viewer_cloud_display_max_points", default_value="8000"),
             Node(
                 package="realsense2_camera",
                 executable="realsense2_camera_node",
@@ -191,6 +209,10 @@ def generate_launch_description():
                             cluster_meanshift_bandwidth_m,
                             value_type=float,
                         ),
+                        "use_top_surface_estimator": ParameterValue(
+                            use_top_surface_estimator,
+                            value_type=bool,
+                        ),
                         "top_surface_band_m": ParameterValue(
                             top_surface_band_m,
                             value_type=float,
@@ -198,6 +220,30 @@ def generate_launch_description():
                         "top_surface_min_fraction": ParameterValue(
                             top_surface_min_fraction,
                             value_type=float,
+                        ),
+                        "top_surface_percentile": ParameterValue(
+                            top_surface_percentile,
+                            value_type=float,
+                        ),
+                        "keypoint_filter_alpha": ParameterValue(
+                            keypoint_filter_alpha,
+                            value_type=float,
+                        ),
+                        "keypoint_jump_reset_m": ParameterValue(
+                            keypoint_jump_reset_m,
+                            value_type=float,
+                        ),
+                        "keypoint_jump_hold_frames": ParameterValue(
+                            keypoint_jump_hold_frames,
+                            value_type=int,
+                        ),
+                        "candidate_lock_radius_m": ParameterValue(
+                            candidate_lock_radius_m,
+                            value_type=float,
+                        ),
+                        "invalid_reset_frames": ParameterValue(
+                            invalid_reset_frames,
+                            value_type=int,
                         ),
                     }
                 ],
@@ -211,6 +257,8 @@ def generate_launch_description():
                 parameters=[
                     {
                         "color_topic": color_topic,
+                        "depth_topic": depth_topic,
+                        "camera_info_topic": camera_info_topic,
                         "overlay_topic": overlay_topic,
                         "prompt_topic": prompt_topic,
                         "score_topic": "/sam3/score",
@@ -219,6 +267,12 @@ def generate_launch_description():
                         "valid_topic": "/perception/valid",
                         "window_name": viewer_window_name,
                         "refresh_hz": ParameterValue(viewer_refresh_hz, value_type=float),
+                        "depth_scale": ParameterValue(depth_scale, value_type=float),
+                        "cloud_stride": ParameterValue(viewer_cloud_stride, value_type=int),
+                        "cloud_display_max_points": ParameterValue(
+                            viewer_cloud_display_max_points,
+                            value_type=int,
+                        ),
                         "keypoint_timeout_sec": ParameterValue(
                             monitor_keypoint_timeout_sec,
                             value_type=float,
@@ -237,6 +291,7 @@ def generate_launch_description():
                         "prompt_topic": prompt_topic,
                         "valid_topic": "/perception/valid",
                         "keypoint_topic": "/perception/keypoint_3d",
+                        "candidate_topic": "/perception/keypoint_candidates_text",
                         "keypoint_timeout_sec": ParameterValue(
                             monitor_keypoint_timeout_sec,
                             value_type=float,

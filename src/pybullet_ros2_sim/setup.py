@@ -36,6 +36,7 @@ setup(
             'scene_object_registry_node = pybullet_ros2_sim.scene_object_registry_node:main',
             'llm_task_planner_node = pybullet_ros2_sim.llm_task_planner_node:main',
             'llm_task_executor_node = pybullet_ros2_sim.llm_task_executor_node:main',
+            'keypoint_debug_plan_player_node = pybullet_ros2_sim.keypoint_debug_plan_player_node:main',
         ],
     },
 )

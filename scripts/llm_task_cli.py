@@ -53,11 +53,23 @@ class LlmTaskCli(Node):
             self.failed_status = False
             self.status_event.set()
 
-    def send_instruction(self, text: str):
+    def wait_for_instruction_subscriber(self, timeout_sec: float) -> bool:
+        deadline = time.time() + max(timeout_sec, 0.0)
+        while time.time() < deadline:
+            if self.pub_instruction.get_subscription_count() > 0:
+                return True
+            time.sleep(0.05)
+        return self.pub_instruction.get_subscription_count() > 0
+
+    def send_instruction(self, text: str, repeat_sec: float = 0.0):
         msg = String()
         msg.data = text
+        deadline = time.time() + max(repeat_sec, 0.0)
         self.pub_instruction.publish(msg)
         print(f"[sent] {text}", flush=True)
+        while time.time() < deadline:
+            time.sleep(0.1)
+            self.pub_instruction.publish(msg)
 
     def wait_for_status(self, timeout_sec: float) -> tuple[bool, str]:
         if not (self.wait_prefixes or self.fail_prefixes):
@@ -85,6 +97,11 @@ def build_parser():
         help="Send one instruction and exit",
     )
     parser.add_argument(
+        "--listen-only",
+        action="store_true",
+        help="Do not publish an instruction; only print and optionally wait on status updates.",
+    )
+    parser.add_argument(
         "--no-status",
         action="store_true",
         help="Do not print planner/executor status updates",
@@ -106,6 +123,18 @@ def build_parser():
         type=float,
         default=120.0,
         help="Maximum time to wait for a matching status when --wait-status-prefix is used.",
+    )
+    parser.add_argument(
+        "--publish-warmup-sec",
+        type=float,
+        default=2.0,
+        help="Maximum time to wait for an instruction subscriber before --once publishes.",
+    )
+    parser.add_argument(
+        "--publish-repeat-sec",
+        type=float,
+        default=1.0,
+        help="Duration for repeating the --once instruction publish to avoid ROS discovery loss.",
     )
     return parser
 
@@ -139,6 +168,9 @@ def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    if args.listen_only and args.once:
+        parser.error("--listen-only cannot be combined with --once")
+
     rclpy.init()
     node = LlmTaskCli(
         instruction_topic=args.instruction_topic,
@@ -157,8 +189,34 @@ def main(argv=None):
     time.sleep(0.2)
 
     try:
-        if args.once:
-            node.send_instruction(args.once)
+        if args.listen_only:
+            print(f"[watching] {args.status_topic}", flush=True)
+            if args.wait_status_prefix or args.fail_status_prefix:
+                ok, matched_status = node.wait_for_status(args.timeout_sec)
+                if not ok and not matched_status:
+                    print(
+                        f"[error] timed out after {args.timeout_sec:.1f}s waiting for status",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    raise SystemExit(1)
+                if matched_status and node.failed_status:
+                    print(f"[error] {matched_status}", file=sys.stderr, flush=True)
+                    raise SystemExit(2)
+            else:
+                while rclpy.ok():
+                    time.sleep(0.2)
+        elif args.once:
+            subscriber_ready = node.wait_for_instruction_subscriber(args.publish_warmup_sec)
+            repeat_sec = 0.0
+            if not subscriber_ready:
+                print(
+                    "[warn] no instruction subscriber discovered before publishing",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                repeat_sec = args.publish_repeat_sec
+            node.send_instruction(args.once, repeat_sec=repeat_sec)
             if args.wait_status_prefix or args.fail_status_prefix:
                 ok, matched_status = node.wait_for_status(args.timeout_sec)
                 if not ok and not matched_status:

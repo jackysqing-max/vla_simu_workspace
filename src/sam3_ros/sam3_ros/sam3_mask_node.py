@@ -62,6 +62,8 @@ class Sam3MaskNode(Node):
         self.declare_parameter("infer_hz", 0.5)
         self.declare_parameter("device", "cpu")
         self.declare_parameter("prompt_topic", "/sam3/prompt")
+        self.declare_parameter("active_prompt_topic", "/sam3/active_prompt")
+        self.declare_parameter("prompt_republish_sec", 1.0)
 
         self.image_topic = self.get_parameter("image_topic").value
         self.prompt = self.get_parameter("prompt").value
@@ -71,6 +73,8 @@ class Sam3MaskNode(Node):
         self.infer_hz = float(self.get_parameter("infer_hz").value)
         self.device = str(self.get_parameter("device").value)
         self.prompt_topic = self.get_parameter("prompt_topic").value
+        self.active_prompt_topic = self.get_parameter("active_prompt_topic").value
+        self.prompt_republish_sec = float(self.get_parameter("prompt_republish_sec").value)
 
         qos = QoSProfile(depth=1)
         qos.reliability = ReliabilityPolicy.BEST_EFFORT
@@ -78,6 +82,7 @@ class Sam3MaskNode(Node):
 
         self.sub = self.create_subscription(Image, self.image_topic, self.on_image, qos)
         self.sub_prompt = self.create_subscription(String, self.prompt_topic, self.on_prompt, 10)
+        self.pub_active_prompt = self.create_publisher(String, self.active_prompt_topic, 10)
         self.pub_mask = self.create_publisher(Image, "/sam3/mask", 1)
         self.pub_score = self.create_publisher(Float32, "/sam3/score", 1)
 
@@ -85,6 +90,7 @@ class Sam3MaskNode(Node):
         # inference from building up stale backlog.
         self.q = queue.Queue(maxsize=1)
         self._last_status_log_time = 0.0
+        self._last_prompt_broadcast = ""
 
         if self.device == "cuda" and not torch.cuda.is_available():
             self.get_logger().warning(
@@ -104,9 +110,16 @@ class Sam3MaskNode(Node):
 
         self.worker = threading.Thread(target=self.infer_loop, daemon=True)
         self.worker.start()
+        if self.prompt_republish_sec > 0.0:
+            self.prompt_timer = self.create_timer(
+                self.prompt_republish_sec,
+                self.publish_prompt_if_needed,
+            )
+        self.publish_prompt(force=True)
 
         self.get_logger().info(
-            f"Subscribed: {self.image_topic} | Publishing: /sam3/mask + /sam3/score | "
+            f"Subscribed: {self.image_topic} + {self.prompt_topic} | "
+            f"Publishing: /sam3/mask + /sam3/score + {self.active_prompt_topic} | "
             f"infer_hz={self.infer_hz}"
         )
 
@@ -116,6 +129,21 @@ class Sam3MaskNode(Node):
             return
         self.prompt = new_prompt
         self.get_logger().info(f"Updated prompt: {self.prompt}")
+        self.publish_prompt(force=True)
+
+    def publish_prompt(self, *, force: bool = False):
+        prompt = str(self.prompt).strip()
+        if not prompt:
+            return
+        if not force and prompt == self._last_prompt_broadcast:
+            return
+        msg = String()
+        msg.data = prompt
+        self.pub_active_prompt.publish(msg)
+        self._last_prompt_broadcast = prompt
+
+    def publish_prompt_if_needed(self):
+        self.publish_prompt(force=False)
 
     def on_image(self, msg: Image):
         rgb = imgmsg_to_rgb(msg)

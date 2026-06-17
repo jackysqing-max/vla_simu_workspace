@@ -7,6 +7,8 @@
 #include <QMetaObject>
 #include <QInputDialog>
 #include <QLabel>
+#include <QColor>
+#include <QPen>
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -39,11 +41,33 @@ MainWindow::MainWindow(QWidget *parent)
         for (int joint_index = 0; joint_index < kJointCount; joint_index++)
             m_buffer[panel_index][joint_index].reserve(sampleCount);
     }
+    keypoint_widget_ = new Widget("Keypoint XYZ / m", this);
+    ui->gridLayout->addWidget(keypoint_widget_, 2, 0, 1, 2);
+    QLineSeries **keypoint_series = keypoint_widget_->getSeries();
+    const QString keypoint_names[3] = {"x", "y", "z"};
+    const QColor keypoint_colors[3] = {
+        QColor(255, 90, 90),
+        QColor(90, 220, 120),
+        QColor(90, 170, 255),
+    };
+    for (int axis_index = 0; axis_index < 3; axis_index++)
+    {
+        keypoint_series[axis_index]->setName(keypoint_names[axis_index]);
+        QPen pen = keypoint_series[axis_index]->pen();
+        pen.setColor(keypoint_colors[axis_index]);
+        pen.setWidthF(2.0);
+        keypoint_series[axis_index]->setPen(pen);
+        keypoint_buffer_[axis_index].reserve(sampleCount);
+    }
+    for (int axis_index = 3; axis_index < kJointCount; axis_index++)
+        keypoint_series[axis_index]->setVisible(false);
 
     logging_message_ = new QLabel(this);
     keypoint_message_ = new QLabel(this);
+    candidate_message_ = new QLabel(this);
     statusBar()->addPermanentWidget(logging_message_);
     statusBar()->addPermanentWidget(keypoint_message_, 1);
+    statusBar()->addPermanentWidget(candidate_message_, 2);
     isScaling = true;
     isLogging = false;
     frames.reserve(sampleCount * 5);
@@ -76,8 +100,13 @@ MainWindow::MainWindow(QWidget *parent)
         "keypoint_topic",
         "/perception/keypoint_3d"
     );
+    const auto candidate_topic = node_->declare_parameter<std::string>(
+        "candidate_topic",
+        "/perception/keypoint_candidates_text"
+    );
     keypoint_timeout_sec_ = node_->declare_parameter<double>("keypoint_timeout_sec", 1.0);
     start_time_ = node_->now();
+    keypoint_start_time_ = start_time_;
 
     auto topic_callback =
         [this](robot_control_msgs::msg::RobotState::SharedPtr msg) -> void
@@ -130,7 +159,31 @@ MainWindow::MainWindow(QWidget *parent)
                              std::isfinite(keypoint_z_);
             latest_keypoint_time_ = rclcpp::Time(msg->header.stamp);
             keypoint_stamp_is_zero_ = msg->header.stamp.sec == 0 && msg->header.stamp.nanosec == 0;
+            if (have_keypoint_)
+                pushKeypointSample(
+                    (node_->now() - keypoint_start_time_).seconds(),
+                    keypoint_x_,
+                    keypoint_y_,
+                    keypoint_z_
+                );
         }
+    );
+    candidate_subscription_ = node_->create_subscription<std_msgs::msg::String>(
+        candidate_topic,
+        10,
+        [this](const std_msgs::msg::String::SharedPtr msg) -> void
+        {
+            std::lock_guard<std::mutex> guard(mtx);
+            current_candidate_summary_ = msg->data;
+        }
+    );
+    RCLCPP_INFO(
+        node_->get_logger(),
+        "robot_monitor perception subscriptions: prompt=%s valid=%s keypoint=%s candidates=%s",
+        prompt_topic.c_str(),
+        valid_topic.c_str(),
+        keypoint_topic.c_str(),
+        candidate_topic.c_str()
     );
 
     tt = std::make_shared<std::thread>([this]()
@@ -187,8 +240,11 @@ void MainWindow::setLineWidth()
     double ww = QInputDialog::getDouble(this, tr("Input Line Width"),
                                         tr("Line Width:"), 2, 0, 10, 2, &ok);
     if (ok)
+    {
         for (int panel_index = 0; panel_index < kPanelCount; panel_index++)
             widgets[panel_index]->setLineWidth(ww);
+        keypoint_widget_->setLineWidth(ww);
+    }
 }
 
 void MainWindow::zoomIn()
@@ -255,6 +311,7 @@ void MainWindow::onTimer()
     std::unique_lock<std::mutex> guard(mtx);
 
     const std::string prompt = current_prompt_;
+    const std::string candidate_summary = current_candidate_summary_;
     const std::string frame_id = keypoint_frame_id_;
     const bool have_keypoint = have_keypoint_;
     const bool keypoint_valid = keypoint_valid_;
@@ -304,14 +361,69 @@ void MainWindow::onTimer()
     }
     keypoint_message_->setText(keypoint_text);
 
-    if (have_keypoint && keypoint_valid && keypoint_fresh)
+    QString candidate_text;
+    if (candidate_summary.empty())
+        candidate_text = "Candidates: waiting";
+    else
+        candidate_text = QString::fromStdString(candidate_summary);
+    candidate_message_->setText(candidate_text);
+
+    const auto now = node_->now();
+    if (!have_keypoint_log_time_ || (now - last_keypoint_log_time_).seconds() >= 1.0)
     {
-        const auto now = node_->now();
-        if (!have_keypoint_log_time_ || (now - last_keypoint_log_time_).seconds() >= 1.0)
+        RCLCPP_INFO(node_->get_logger(), "%s", keypoint_text.toStdString().c_str());
+        last_keypoint_log_time_ = now;
+        have_keypoint_log_time_ = true;
+    }
+    if (!candidate_summary.empty())
+    {
+        if (!have_candidate_log_time_ || (now - last_candidate_log_time_).seconds() >= 1.0)
         {
-            RCLCPP_INFO(node_->get_logger(), "%s", keypoint_text.toStdString().c_str());
-            last_keypoint_log_time_ = now;
-            have_keypoint_log_time_ = true;
+            RCLCPP_INFO(node_->get_logger(), "%s", candidate_summary.c_str());
+            last_candidate_log_time_ = now;
+            have_candidate_log_time_ = true;
+        }
+    }
+
+    QLineSeries **keypoint_series = keypoint_widget_->getSeries();
+    if (keypoint_buffer_[0].isEmpty())
+    {
+        for (int axis_index = 0; axis_index < 3; axis_index++)
+            keypoint_series[axis_index]->clear();
+    }
+    else
+    {
+        std::vector<double> keypoint_lows;
+        std::vector<double> keypoint_highs;
+        for (int axis_index = 0; axis_index < 3; axis_index++)
+        {
+            keypoint_series[axis_index]->replace(keypoint_buffer_[axis_index]);
+            auto min_max = std::minmax_element(
+                keypoint_buffer_[axis_index].begin(),
+                keypoint_buffer_[axis_index].end(),
+                [](const QPointF &lhs, const QPointF &rhs)
+                { return lhs.y() < rhs.y(); });
+            keypoint_lows.push_back(min_max.first->y());
+            keypoint_highs.push_back(min_max.second->y());
+        }
+
+        const double kp_t0 = keypoint_buffer_[0].first().x();
+        const double kp_t1 = keypoint_buffer_[0].back().x();
+        if (kp_t1 - kp_t0 <= time_width)
+            keypoint_widget_->getXAxis()->setRange(kp_t0, kp_t0 + time_width);
+        else
+            keypoint_widget_->getXAxis()->setRange(kp_t1 - time_width, kp_t1);
+
+        if (isScaling)
+        {
+            double ymin = *std::min_element(keypoint_lows.begin(), keypoint_lows.end());
+            double ymax = *std::max_element(keypoint_highs.begin(), keypoint_highs.end());
+            if (ymax - ymin < 1e-4)
+            {
+                ymin -= 0.05;
+                ymax += 0.05;
+            }
+            keypoint_widget_->getYAxis()->setRange(ymin, ymax);
         }
     }
 
@@ -413,5 +525,18 @@ void MainWindow::clear()
     for (int panel_index = 0; panel_index < kPanelCount; panel_index++)
         for (int joint_index = 0; joint_index < kJointCount; joint_index++)
             m_buffer[panel_index][joint_index].clear();
+    for (int axis_index = 0; axis_index < 3; axis_index++)
+        keypoint_buffer_[axis_index].clear();
     frames.clear();
+}
+
+void MainWindow::pushKeypointSample(double t, double x, double y, double z)
+{
+    const double values[3] = {x, y, z};
+    for (int axis_index = 0; axis_index < 3; axis_index++)
+    {
+        if (keypoint_buffer_[axis_index].size() >= sampleCount)
+            keypoint_buffer_[axis_index].removeFirst();
+        keypoint_buffer_[axis_index].append(QPointF(t, values[axis_index]));
+    }
 }
