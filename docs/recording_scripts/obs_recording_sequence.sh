@@ -4,7 +4,7 @@ set -euo pipefail
 WS="/home/siqin/ros2_workspaces/humble/ros2_pybullet_ws"
 SCRIPTS="$WS/docs/recording_scripts"
 
-TASK="${TASK:-pick up the left silver surgical instrument and then release it}"
+TASK="${TASK:-pick up the left silver surgical instrument and place it into the tray center}"
 VISUAL_TASK="${VISUAL_TASK:-locate the left silver surgical instrument}"
 HOVER_TASK="${HOVER_TASK:-move above the left silver surgical instrument}"
 SAM3_PROMPT="${SAM3_PROMPT:-left silver surgical instrument}"
@@ -35,14 +35,16 @@ print_header() {
 print_llm_topic_tips() {
   cat <<EOF
 
-Optional topic windows for this LLM clip:
+Optional topic windows for this LLM-only clip:
 
   cd $WS
   source /opt/ros/humble/setup.bash
   source install/setup.bash
   ros2 topic echo /llm_task/status
   ros2 topic echo /llm_task/plan_json
-  ros2 topic echo /sam3/active_prompt
+
+No SAM3/PyBullet window is needed here. The target_prompt values in plan_json
+are the text prompts that the executor later sends to perception.
 
 EOF
 }
@@ -50,29 +52,30 @@ EOF
 stage_1_llm() {
   print_header "1" "LLM task decomposition and prompt handoff" "01_llm_task_decomposition.gif"
   stop_stack
-  pause "Start OBS recording, then start the LLM/prompt stack."
+  pause "Start OBS recording for the static prompt/schema explanation."
 
-  ENABLE_GRIPPER="${ENABLE_GRIPPER:-true}" \
-  GRIPPER_MODEL="${GRIPPER_MODEL:-franka_hand}" \
+  "$SCRIPTS/01c_llm_prompt_schema_cheatsheet.sh"
+
+  pause "Stop or keep OBS running. Next is the live ROS topic input/output clip."
+
   "$SCRIPTS/01a_llm_prompt_stack_start.sh"
-
   print_llm_topic_tips
-  pause "When the stack is ready and OBS is recording, send the LLM task."
+  pause "When OBS and optional topic echo windows are ready, send the LLM task."
 
   "$SCRIPTS/01b_llm_prompt_send_task.sh" "$TASK"
 
-  pause "Keep OBS recording until plan_json and SAM3 prompt handoff are visible."
+  pause "Keep OBS recording until plan_json and target_prompt handoff are visible."
   stop_stack
 }
 
 stage_2_visual() {
   print_header "2" "Visual perception: SAM3 + GMS keypoint" "02_sam3_gms_keypoint.gif"
   stop_stack
-  pause "Start OBS recording on SAM3 Mask / Keypoint / Point Cloud windows, then launch this stage."
+  pause "Start OBS recording on SAM3 Mask and SAM3 Keypoint windows, then launch this stage. The point-cloud window is disabled."
 
-  "$SCRIPTS/02_visual_sam3_gms_recording.sh" "$VISUAL_TASK"
+  "$SCRIPTS/02a_medical_scene_visual_keypoint_recording.sh" "$SAM3_PROMPT"
 
-  pause "Record the mask, selected keypoint, and masked point cloud."
+  pause "Record the SAM3 mask and selected GMS keypoint overlay."
   stop_stack
 }
 
@@ -169,7 +172,7 @@ Usage:
   ./recording_scripts/obs_recording_sequence.sh stop   # stop current stack
 
 Stages:
-  1  LLM task decomposition and prompt handoff
+  1  LLM task decomposition and prompt handoff, text-only
   2  Visual perception: SAM3 + GMS keypoint
   3  Robot Cartesian straight-line trajectory
   4  Robot Cartesian circular trajectory

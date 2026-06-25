@@ -5,6 +5,12 @@ between stages so old ROS nodes, Qwen3, SAM3, and PyBullet processes do not over
 
 ## Guided OBS sequence
 
+Recommended director script for PPT recording:
+
+```bash
+docs/recording_scripts/recording_director.sh core
+```
+
 Run every clip in order with prompts:
 
 ```bash
@@ -25,42 +31,73 @@ docs/recording_scripts/00_stop_recording_stack.sh
 
 ## 1. LLM task decomposition and prompt handoff
 
-Recommended two-step recording mode:
+This clip is text-only. It shows natural-language input, the constrained JSON
+task plan, and how each `target_prompt` would be handed to perception later.
+It does not start PyBullet, SAM3, GMS, or any visualizer.
+
+Static prompt/schema explanation:
+
+```bash
+docs/recording_scripts/01c_llm_prompt_schema_cheatsheet.sh
+```
+
+Live ROS topic input/output:
 
 ```bash
 docs/recording_scripts/01a_llm_prompt_stack_start.sh
 ```
 
-Then open topic/log terminals and start OBS. Send the task with:
+Then open optional topic terminals and start OBS:
+
+```bash
+cd /home/siqin/ros2_workspaces/humble/ros2_pybullet_ws
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ros2 topic echo /llm_task/status
+ros2 topic echo /llm_task/plan_json
+```
+
+Send the task with:
 
 ```bash
 docs/recording_scripts/01b_llm_prompt_send_task.sh \
-  "pick up the left silver surgical instrument and then release it"
+  "pick up the left silver surgical instrument and place it into the tray center"
 ```
 
 One-shot mode:
 
 ```bash
 docs/recording_scripts/01_llm_task_prompt_recording.sh \
-  "pick up the left silver surgical instrument and then release it"
+  "pick up the left silver surgical instrument and place it into the tray center"
 ```
 
 OBS target:
 
 - terminal output from the script
-- optional ROS topic echo windows for `/llm_task/status`, `/llm_task/plan_json`, `/sam3/active_prompt`
+- optional ROS topic echo windows for `/llm_task/status` and `/llm_task/plan_json`
+- the `target_prompt` handoff table printed by `01b`
+
+By default, `01a` uses an already-running Qwen3 service if available. If Qwen3
+is not running, it falls back to the deterministic local planner so recording
+does not block. For a live Qwen3 clip:
+
+```bash
+QWEN3_AUTO_START=true LLM_BACKEND=qwen3_local \
+  docs/recording_scripts/01a_llm_prompt_stack_start.sh
+```
 
 ## 2. Visual perception: SAM3 + GMS
 
 ```bash
-docs/recording_scripts/02_visual_sam3_gms_recording.sh \
-  "locate the left silver surgical instrument"
+docs/recording_scripts/02a_medical_scene_visual_keypoint_recording.sh \
+  "left silver surgical instrument"
 ```
 
 OBS targets:
 
 - enlarged `SAM3 Mask`
 - enlarged `SAM3 Keypoint`
+- point-cloud window is disabled
 
 ## 3. Robot hover/follow motion
 
@@ -123,7 +160,7 @@ Medical instrument sorting:
 
 ```bash
 docs/recording_scripts/09_medical_instrument_sorting_recording.sh \
-  "pick up the left silver surgical instrument and then release it"
+  "pick up the left silver surgical instrument and place it into the tray center"
 ```
 
 Known limitation / keypoint jitter:

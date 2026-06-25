@@ -9,7 +9,7 @@ PID_DIR="$WS/run_pids"
 info() { echo "[INFO] $*"; }
 warn() { echo "[WARN] $*" >&2; }
 
-PATTERN="start_llm_rekep_demo|start_semantic_tracking_demo|start_rekep_demo|semantic_prompt_cli|llm_task_cli|iiwa_pybullet_rgbd_sim_node|iiwa_keypoint_tracker_node|scene_object_registry_node|llm_task_planner_node|llm_task_executor_node|sam3_mask_node|mask_depth_fusion_node|robotstate_bridge|robot_monitor"
+PATTERN="start_llm_rekep_demo|start_semantic_tracking_demo|start_rekep_demo|semantic_prompt_cli|llm_task_cli|llm_plan_capture|iiwa_pybullet_rgbd_sim_node|iiwa_keypoint_tracker_node|scene_object_registry_node|llm_task_planner_node|llm_task_executor_node|sam3_mask_node|mask_depth_fusion_node|robotstate_bridge|robot_monitor"
 
 source_ros() {
   set +u
@@ -83,6 +83,7 @@ main() {
   kill_matches "start_semantic_tracking_demo.sh"
   kill_matches "start_rekep_demo.sh"
   kill_matches "semantic_prompt_cli.py"
+  kill_matches "llm_plan_capture.py"
   kill_matches "python -m sam3_ros.sam3_mask_node"
   kill_matches "sam3_mask_node"
   kill_matches "iiwa_pybullet_rgbd_sim_node"

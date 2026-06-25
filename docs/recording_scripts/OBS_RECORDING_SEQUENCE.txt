@@ -5,6 +5,14 @@ OBS 录制顺序执行指南
 
   cd /home/siqin/ros2_workspaces/humble/ros2_pybullet_ws/docs
 
+推荐导演脚本：
+
+  ./recording_scripts/recording_director.sh core
+
+只录视觉分割与关键点：
+
+  ./recording_scripts/recording_director.sh vision
+
 通用规则：
 
   1. 每录一段前，先执行：
@@ -40,16 +48,20 @@ OBS 录制顺序执行指南
 
 录制目标：
 
-  展示自然语言任务如何被 LLM 分解为 plan_json，
-  并把目标 object / prompt 传递给 SAM3。
+  纯终端展示自然语言任务如何被 LLM / planner 分解为 plan_json，
+  以及每个 target_prompt 后续如何传递给 SAM3 / fusion。
+  这一段不需要 PyBullet、SAM3、GMS 或可视化窗口。
 
 建议 OBS 画面：
 
-  - 终端输出
-  - /llm_task/status
-  - /llm_task/plan_json
-  - /sam3/active_prompt
-  - 可选：PyBullet GUI，显示整齐排列的银灰色器械和 Franka 抓手
+  - 终端输出：prompt / schema / plan_json / prompt handoff
+  - 可选 topic 窗口：/llm_task/status
+  - 可选 topic 窗口：/llm_task/plan_json
+
+推荐录两小段：
+
+  1. 静态讲解：输入 prompt、允许动作、JSON schema、多动作顺序规则。
+  2. live topic：实际发送任务，录 /llm_task/status 和 /llm_task/plan_json。
 
 执行顺序：
 
@@ -57,8 +69,12 @@ OBS 录制顺序执行指南
 
   ./recording_scripts/00_stop_recording_stack.sh
 
-  ENABLE_GRIPPER=true \
-  GRIPPER_MODEL=franka_hand \
+先录静态 prompt/schema 讲解：
+
+  ./recording_scripts/01c_llm_prompt_schema_cheatsheet.sh
+
+然后录 live planner 输入输出：
+
   ./recording_scripts/01a_llm_prompt_stack_start.sh
 
 如果要单独开 topic echo 窗口，新开终端执行：
@@ -75,21 +91,32 @@ OBS 录制顺序执行指南
   source install/setup.bash
   ros2 topic echo /llm_task/plan_json
 
-再开一个终端：
-
-  cd /home/siqin/ros2_workspaces/humble/ros2_pybullet_ws
-  source /opt/ros/humble/setup.bash
-  source install/setup.bash
-  ros2 topic echo /sam3/active_prompt
-
 OBS 开始录制后，发送任务：
 
   cd /home/siqin/ros2_workspaces/humble/ros2_pybullet_ws/docs
 
   ./recording_scripts/01b_llm_prompt_send_task.sh \
+    "pick up the left silver surgical instrument and place it into the tray center"
+
+如果你想沿用更短的英文指令，也可以录这一条：
+
+  ./recording_scripts/01b_llm_prompt_send_task.sh \
     "pick up the left silver surgical instrument and then release it"
 
-录到 plan_json 和 prompt handoff 后停止：
+说明：
+
+  - 上面较短的 release 指令会被 planner/sanitizer 补成：
+    grasp left silver surgical instrument -> hover white sorting tray center -> release.
+  - 这样可以避免“抓起后还没切换到托盘 prompt 就释放”的穿帮问题。
+  - 如果本地 Qwen3 已经运行，01a 会直接使用 Qwen3。
+  - 如果 Qwen3 没运行，01a 默认使用 deterministic local fallback，方便稳定录制。
+  - 如果一定要录真实 Qwen3 输出，使用：
+
+      QWEN3_AUTO_START=true \
+      LLM_BACKEND=qwen3_local \
+      ./recording_scripts/01a_llm_prompt_stack_start.sh
+
+录到 plan_json 和 target_prompt handoff 后停止：
 
   ./recording_scripts/00_stop_recording_stack.sh
 
@@ -114,8 +141,8 @@ OBS 开始录制后，发送任务：
 
   ./recording_scripts/00_stop_recording_stack.sh
 
-  ./recording_scripts/02_visual_sam3_gms_recording.sh \
-    "locate the left silver surgical instrument"
+  ./recording_scripts/02a_medical_scene_visual_keypoint_recording.sh \
+    "left silver surgical instrument"
 
 录到 mask 和 keypoint overlay 后停止：
 
@@ -251,7 +278,7 @@ OBS 开始录制后，发送任务：
 录制目标：
 
   展示当前主线任务：
-  left silver surgical instrument 的 approach、grasp、lift、release。
+  left silver surgical instrument 的 approach、grasp、lift、move to tray center、lower、release。
 
 建议 OBS 画面：
 
@@ -269,7 +296,7 @@ OBS 开始录制后，发送任务：
   # 并在抓取遮挡时短时间使用最近一次有效 keypoint。
   GRIPPER_MODEL=franka_hand \
   ./recording_scripts/09_medical_instrument_sorting_recording.sh \
-    "pick up the left silver surgical instrument and then release it"
+    "pick up the left silver surgical instrument and place it into the tray center"
 
 录到完整抓取释放后停止：
 

@@ -120,6 +120,13 @@ _OPEN_VOCAB_TARGET_PATTERNS = (
 )
 _OPEN_VOCAB_PLACE_PATTERNS = (
     re.compile(
+        r"^(?:pick up|pick|grasp|grab|hold|clamp)\s+(?P<object>.+?)\s+"
+        r"(?:and\s+)?(?:then\s+)?(?:place|put|move)\s+"
+        r"(?:it|them|the object|the item)?\s*"
+        r"(?:in|into|onto|on|to)\s+(?P<destination>.+)$",
+        flags=re.IGNORECASE,
+    ),
+    re.compile(
         r"^(?:put|place|move)\s+(?P<object>.+?)\s+(?:in|into|onto|on|to)\s+(?P<destination>.+)$",
         flags=re.IGNORECASE,
     ),
@@ -127,6 +134,12 @@ _OPEN_VOCAB_PLACE_PATTERNS = (
         r"^(?:把)?(?P<object>.+?)(?:放到|放进|放入|放在|放至|移到|移动到)(?P<destination>.+?)(?:里|中|上|内)?$",
         flags=re.IGNORECASE,
     ),
+)
+_OPEN_VOCAB_GRASP_RELEASE_PATTERN = re.compile(
+    r"^(?:pick up|pick|grasp|grab|hold|clamp)\s+(?P<object>.+?)\s+"
+    r"(?:(?:and\s+)?then\s+|and\s+)?(?:release|drop|put down)\s*"
+    r"(?:it|them|the object|the item)?$",
+    flags=re.IGNORECASE,
 )
 _OPEN_VOCAB_SPECIAL_PROMPTS = {
     "剪刀": "left silver surgical instrument",
@@ -487,6 +500,40 @@ def _infer_open_vocabulary_plan_from_instruction(
                             "action": "release_gripper",
                             "target_prompt": "",
                             "description": "release gripper at destination",
+                            "success_radius_m": 0.0,
+                            "dwell_sec": 0.0,
+                            "wait_sec": 0.8,
+                        },
+                    ],
+                },
+                allow_open_vocabulary=True,
+                allow_grasp_actions=True,
+            )
+
+        grasp_release_match = _OPEN_VOCAB_GRASP_RELEASE_PATTERN.search(
+            re.sub(r"\s+", " ", text.strip().lower())
+        )
+        if grasp_release_match:
+            object_prompt = _canonicalize_open_prompt(grasp_release_match.group("object"))
+            return sanitize_plan(
+                {
+                    "task_summary": text,
+                    "planning_notes": "Generated locally as a grasp-and-release sequence.",
+                    "steps": [
+                        {
+                            "step_index": 1,
+                            "action": "grasp_target",
+                            "target_prompt": object_prompt,
+                            "description": f"grasp {object_prompt}",
+                            "success_radius_m": 0.0,
+                            "dwell_sec": 1.0,
+                            "wait_sec": 0.0,
+                        },
+                        {
+                            "step_index": 2,
+                            "action": "release_gripper",
+                            "target_prompt": "",
+                            "description": "release gripper",
                             "success_radius_m": 0.0,
                             "dwell_sec": 0.0,
                             "wait_sec": 0.8,

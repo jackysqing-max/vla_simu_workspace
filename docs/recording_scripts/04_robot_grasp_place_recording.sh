@@ -2,10 +2,10 @@
 set -euo pipefail
 
 WS="/home/siqin/ros2_workspaces/humble/ros2_pybullet_ws"
-TASK="${*:-pick up the left silver surgical instrument and then release it}"
+TASK="${*:-pick up the left silver surgical instrument and place it into the tray center}"
 cd "$WS"
 
-# OBS target: PyBullet GUI showing task-level approach, grasp, lift, and release.
+# OBS target: PyBullet GUI showing approach, grasp, lift, move to tray center, lower, and release.
 export SIM_GUI="${SIM_GUI:-true}"
 export GPU_MONITOR_WINDOW="${GPU_MONITOR_WINDOW:-false}"
 export START_KEYPOINT_VIEWER="${START_KEYPOINT_VIEWER:-false}"

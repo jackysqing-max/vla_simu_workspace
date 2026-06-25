@@ -19,6 +19,7 @@ def generate_launch_description():
     realsense_log_level = LaunchConfiguration("realsense_log_level")
     prompt = LaunchConfiguration("prompt")
     prompt_topic = LaunchConfiguration("prompt_topic")
+    active_prompt_topic = LaunchConfiguration("active_prompt_topic")
     sam3_python = LaunchConfiguration("sam3_python")
     sam3_device = LaunchConfiguration("sam3_device")
     sam3_infer_hz = LaunchConfiguration("sam3_infer_hz")
@@ -41,6 +42,16 @@ def generate_launch_description():
     keypoint_jump_hold_frames = LaunchConfiguration("keypoint_jump_hold_frames")
     candidate_lock_radius_m = LaunchConfiguration("candidate_lock_radius_m")
     invalid_reset_frames = LaunchConfiguration("invalid_reset_frames")
+    prompt_settle_sec = LaunchConfiguration("prompt_settle_sec")
+    enable_container_center_keypoint = LaunchConfiguration("enable_container_center_keypoint")
+    container_center_inner_fraction = LaunchConfiguration("container_center_inner_fraction")
+    container_center_z_percentile = LaunchConfiguration("container_center_z_percentile")
+    container_center_z_offset_m = LaunchConfiguration("container_center_z_offset_m")
+    container_center_min_points = LaunchConfiguration("container_center_min_points")
+    container_center_expected_world = LaunchConfiguration("container_center_expected_world")
+    container_center_expected_max_distance_m = LaunchConfiguration(
+        "container_center_expected_max_distance_m"
+    )
     overlay_topic = LaunchConfiguration("overlay_topic")
     start_overlay_viewer = LaunchConfiguration("start_overlay_viewer")
     start_robot_monitor = LaunchConfiguration("start_robot_monitor")
@@ -80,6 +91,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument("prompt", default_value="red cube"),
             DeclareLaunchArgument("prompt_topic", default_value="/sam3/prompt"),
+            DeclareLaunchArgument("active_prompt_topic", default_value="/sam3/active_prompt"),
             DeclareLaunchArgument(
                 "sam3_python",
                 default_value=PathJoinSubstitution(
@@ -127,6 +139,14 @@ def generate_launch_description():
             DeclareLaunchArgument("keypoint_jump_hold_frames", default_value="12"),
             DeclareLaunchArgument("candidate_lock_radius_m", default_value="0.08"),
             DeclareLaunchArgument("invalid_reset_frames", default_value="30"),
+            DeclareLaunchArgument("prompt_settle_sec", default_value="0.8"),
+            DeclareLaunchArgument("enable_container_center_keypoint", default_value="true"),
+            DeclareLaunchArgument("container_center_inner_fraction", default_value="0.55"),
+            DeclareLaunchArgument("container_center_z_percentile", default_value="20.0"),
+            DeclareLaunchArgument("container_center_z_offset_m", default_value="0.0"),
+            DeclareLaunchArgument("container_center_min_points", default_value="48"),
+            DeclareLaunchArgument("container_center_expected_world", default_value="[0.0,0.0,0.0]"),
+            DeclareLaunchArgument("container_center_expected_max_distance_m", default_value="0.0"),
             DeclareLaunchArgument("monitor_keypoint_timeout_sec", default_value="1.0"),
             DeclareLaunchArgument("viewer_cloud_stride", default_value="2"),
             DeclareLaunchArgument("viewer_cloud_display_max_points", default_value="8000"),
@@ -175,6 +195,8 @@ def generate_launch_description():
                     "-p",
                     ["prompt_topic:=", prompt_topic],
                     "-p",
+                    ["active_prompt_topic:=", active_prompt_topic],
+                    "-p",
                     ["device:=", sam3_device],
                     "-p",
                     ["infer_hz:=", sam3_infer_hz],
@@ -195,6 +217,7 @@ def generate_launch_description():
                     {
                         "mask_topic": "/sam3/mask",
                         "score_topic": "/sam3/score",
+                        "prompt_topic": active_prompt_topic,
                         "color_topic": color_topic,
                         "depth_topic": depth_topic,
                         "camera_info_topic": camera_info_topic,
@@ -244,6 +267,35 @@ def generate_launch_description():
                         "invalid_reset_frames": ParameterValue(
                             invalid_reset_frames,
                             value_type=int,
+                        ),
+                        "prompt_settle_sec": ParameterValue(
+                            prompt_settle_sec,
+                            value_type=float,
+                        ),
+                        "enable_container_center_keypoint": ParameterValue(
+                            enable_container_center_keypoint,
+                            value_type=bool,
+                        ),
+                        "container_center_inner_fraction": ParameterValue(
+                            container_center_inner_fraction,
+                            value_type=float,
+                        ),
+                        "container_center_z_percentile": ParameterValue(
+                            container_center_z_percentile,
+                            value_type=float,
+                        ),
+                        "container_center_z_offset_m": ParameterValue(
+                            container_center_z_offset_m,
+                            value_type=float,
+                        ),
+                        "container_center_min_points": ParameterValue(
+                            container_center_min_points,
+                            value_type=int,
+                        ),
+                        "container_center_expected_world": container_center_expected_world,
+                        "container_center_expected_max_distance_m": ParameterValue(
+                            container_center_expected_max_distance_m,
+                            value_type=float,
                         ),
                     }
                 ],

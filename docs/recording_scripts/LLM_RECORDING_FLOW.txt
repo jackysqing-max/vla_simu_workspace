@@ -1,0 +1,208 @@
+LLM 任务分解录制流程，纯终端版
+==============================
+
+工作目录：
+
+  cd /home/siqin/ros2_workspaces/humble/ros2_pybullet_ws/docs
+
+
+这一段录什么
+------------
+
+这一段不录 PyBullet、不录 SAM3、不录 GMS、不录抓手窗口。
+
+只展示：
+
+  1. 用户自然语言任务输入
+  2. LLM / planner 的约束提示词思想
+  3. 多动作任务如何拆成 primitive actions
+  4. plan_json 的结构
+  5. 每一步 target_prompt 如何传递给后续感知模块
+
+
+推荐 OBS 画面
+------------
+
+  - 一个大终端即可
+  - 可选再开两个小终端：
+      /llm_task/status
+      /llm_task/plan_json
+
+不建议在这一段加入 PyBullet 或 SAM3 画面，否则观众注意力会被视觉窗口带走。
+
+
+第 1 段：静态讲解 prompt / schema / handoff
+------------------------------------------
+
+先停止之前的 demo：
+
+  ./recording_scripts/00_stop_recording_stack.sh
+
+开始 OBS 后运行：
+
+  ./recording_scripts/01c_llm_prompt_schema_cheatsheet.sh
+
+这一段重点讲：
+
+  - LLM 不是直接输出关节角或轨迹。
+  - LLM 输出受约束的 plan_json。
+  - executor 根据 plan_json 逐步调用 perception 和 motion primitive。
+  - target_prompt 是语言 planner 和 SAM3/fusion 的接口。
+
+
+第 2 段：live ROS topic 输入输出
+-------------------------------
+
+启动 LLM-only planner：
+
+  ./recording_scripts/01a_llm_prompt_stack_start.sh
+
+说明：
+
+  - 如果本地 Qwen3 已经在 127.0.0.1:8000 运行，脚本会直接使用 Qwen3。
+  - 如果 Qwen3 没运行，默认使用 deterministic local fallback，保证录制不因为 Qwen 冷启动卡住。
+  - 如果一定要录真实 Qwen3 输出，使用：
+
+      QWEN3_AUTO_START=true \
+      LLM_BACKEND=qwen3_local \
+      ./recording_scripts/01a_llm_prompt_stack_start.sh
+
+可选 topic echo 窗口 1：
+
+  cd /home/siqin/ros2_workspaces/humble/ros2_pybullet_ws
+  source /opt/ros/humble/setup.bash
+  source install/setup.bash
+  ros2 topic echo /llm_task/status
+
+可选 topic echo 窗口 2：
+
+  cd /home/siqin/ros2_workspaces/humble/ros2_pybullet_ws
+  source /opt/ros/humble/setup.bash
+  source install/setup.bash
+  ros2 topic echo /llm_task/plan_json
+
+发送多动作任务：
+
+  cd /home/siqin/ros2_workspaces/humble/ros2_pybullet_ws/docs
+
+  ./recording_scripts/01b_llm_prompt_send_task.sh \
+    "pick up the left silver surgical instrument and place it into the tray center"
+
+也可以录你之前用过的短指令：
+
+  ./recording_scripts/01b_llm_prompt_send_task.sh \
+    "pick up the left silver surgical instrument and then release it"
+
+短指令也会被 sanitizer 处理成更合理的顺序：
+
+  grasp_target(left silver surgical instrument)
+  hover_target(white sorting tray center)
+  release_gripper()
+
+录制结束后：
+
+  ./recording_scripts/00_stop_recording_stack.sh
+
+
+多动作 plan_json 推荐写法
+------------------------
+
+推荐输入任务：
+
+  pick up the left silver surgical instrument and place it into the tray center
+
+推荐 plan_json：
+
+{
+  "task_summary": "Pick up the left silver surgical instrument and place it into the tray center.",
+  "planning_notes": "Use the object prompt for grasping, then switch to the tray-center prompt before releasing.",
+  "steps": [
+    {
+      "step_index": 1,
+      "action": "grasp_target",
+      "target_prompt": "left silver surgical instrument",
+      "description": "grasp the left silver surgical instrument",
+      "success_radius_m": 0.0,
+      "dwell_sec": 1.0,
+      "wait_sec": 0.0
+    },
+    {
+      "step_index": 2,
+      "action": "hover_target",
+      "target_prompt": "white sorting tray center",
+      "description": "move above the center of the sorting tray",
+      "success_radius_m": 0.0,
+      "dwell_sec": 0.8,
+      "wait_sec": 0.0
+    },
+    {
+      "step_index": 3,
+      "action": "release_gripper",
+      "target_prompt": "",
+      "description": "release the gripper inside the tray",
+      "success_radius_m": 0.0,
+      "dwell_sec": 0.0,
+      "wait_sec": 0.8
+    }
+  ]
+}
+
+
+讲解 target_prompt 传递
+----------------------
+
+step 1:
+
+  action = grasp_target
+  target_prompt = left silver surgical instrument
+
+执行含义：
+
+  executor 将该 prompt 发给 SAM3/fusion。
+  感知模块得到目标器械 keypoint / plane / tangent。
+  keypoint 稳定后锁定该抓取目标。
+  机械臂执行接近、闭合、确认夹住、抬起。
+
+step 2:
+
+  action = hover_target
+  target_prompt = white sorting tray center
+
+执行含义：
+
+  executor 切换 prompt。
+  感知模块不再寻找器械，而是寻找托盘中心。
+  托盘中心稳定后锁定放置点。
+  机械臂先抬高，再移动到托盘中心法线方向上方，再下降。
+
+step 3:
+
+  action = release_gripper
+  target_prompt = 空字符串
+
+执行含义：
+
+  不再发送新的视觉 prompt。
+  executor 在已经到达的托盘放置位打开夹爪。
+
+
+PPT 里建议怎么讲
+----------------
+
+可以用一句话总结：
+
+  LLM 负责把开放自然语言任务压缩成受控的 JSON action sequence；
+  target_prompt 负责把每一步语言目标传给 SAM3/fusion；
+  executor 负责等感知稳定、锁定关键点，并按顺序执行 grasp / hover / release。
+
+这也解释了之前的问题：
+
+  如果 release 发生在切换到 tray prompt 之前，系统可能继续使用器械 prompt，
+  从而把另一个器械误识别为放置点。
+
+现在的合理顺序是：
+
+  先抓取目标器械，
+  再切换到 white sorting tray center，
+  等托盘中心稳定并锁定，
+  最后下降并释放。

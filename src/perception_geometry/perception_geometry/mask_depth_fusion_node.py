@@ -118,6 +118,27 @@ def transform_points(transform: np.ndarray, points_xyz: np.ndarray):
     return transformed[:, :3].astype(np.float32)
 
 
+def parse_float_vector(value, default, length: int = 3) -> np.ndarray:
+    if isinstance(value, str):
+        text = value.strip().strip("[]")
+        parts = [part.strip() for part in text.split(",") if part.strip()]
+    else:
+        try:
+            parts = list(value)
+        except TypeError:
+            parts = []
+
+    vector = []
+    for part in parts[:length]:
+        try:
+            vector.append(float(part))
+        except Exception:
+            break
+    if len(vector) < length:
+        vector.extend(float(default[index]) for index in range(len(vector), length))
+    return np.array(vector[:length], dtype=np.float64)
+
+
 def select_top_surface_point(
     xyz_cam: np.ndarray,
     cam_to_world: np.ndarray,
@@ -169,6 +190,61 @@ def select_top_surface_point(
     world_to_cam = np.linalg.inv(cam_to_world)
     center_cam = transform_points(world_to_cam, center_world.reshape(1, 3))[0]
     return center_cam.astype(np.float32), center_world.astype(np.float32), top_world
+
+
+def select_container_center_point(
+    xyz_cam: np.ndarray,
+    cam_to_world: np.ndarray,
+    *,
+    inner_fraction: float,
+    z_percentile: float,
+    z_offset_m: float,
+    min_points: int,
+    expected_world: np.ndarray | None = None,
+    expected_max_distance_m: float = 0.0,
+):
+    """Estimate a placement point at the center of a container footprint."""
+    if xyz_cam.shape[0] == 0:
+        return None, None, np.zeros((0, 3), dtype=np.float32)
+
+    xyz_world = transform_points(cam_to_world, xyz_cam)
+    finite_mask = np.all(np.isfinite(xyz_world), axis=1)
+    xyz_world = xyz_world[finite_mask]
+    if xyz_world.shape[0] < max(int(min_points), 4):
+        return None, None, np.zeros((0, 3), dtype=np.float32)
+
+    if expected_world is not None and expected_max_distance_m > 0.0:
+        expected = np.asarray(expected_world, dtype=np.float64).reshape(3)
+        if np.all(np.isfinite(expected)):
+            distances_xy = np.linalg.norm(xyz_world[:, :2] - expected[None, :2], axis=1)
+            near_expected = distances_xy <= float(expected_max_distance_m)
+            if int(np.count_nonzero(near_expected)) < max(int(min_points), 4):
+                return None, None, np.zeros((0, 3), dtype=np.float32)
+            xyz_world = xyz_world[near_expected]
+
+    xy = xyz_world[:, :2]
+    lo = np.percentile(xy, 5.0, axis=0)
+    hi = np.percentile(xy, 95.0, axis=0)
+    center_xy = (lo + hi) * 0.5
+
+    half_extent = np.maximum((hi - lo) * 0.5, 1e-4)
+    fraction = float(np.clip(inner_fraction, 0.05, 1.0))
+    normalized = np.abs((xy - center_xy[None, :]) / half_extent[None, :])
+    inner_mask = np.logical_and(normalized[:, 0] <= fraction, normalized[:, 1] <= fraction)
+    inner_points = xyz_world[inner_mask]
+    if inner_points.shape[0] < max(int(min_points), 4):
+        inner_points = xyz_world
+
+    percentile = float(np.clip(z_percentile, 0.0, 100.0))
+    center_z = float(np.percentile(inner_points[:, 2], percentile)) + float(z_offset_m)
+    center_world = np.array(
+        [float(center_xy[0]), float(center_xy[1]), center_z],
+        dtype=np.float64,
+    )
+
+    world_to_cam = np.linalg.inv(cam_to_world)
+    center_cam = transform_points(world_to_cam, center_world.reshape(1, 3))[0]
+    return center_cam.astype(np.float32), center_world.astype(np.float32), inner_points
 
 
 def normalize_axis_yaw(yaw_rad: float) -> float:
@@ -345,6 +421,7 @@ class MaskDepthFusionNode(Node):
         super().__init__("mask_depth_fusion_node")
 
         self.declare_parameter("mask_topic", "/sam3/mask")
+        self.declare_parameter("prompt_topic", "/sam3/active_prompt")
         self.declare_parameter("color_topic", "/sim/camera/color/image_raw")
         self.declare_parameter("depth_topic", "/sim/camera/aligned_depth_to_color/image_raw")
         self.declare_parameter("camera_info_topic", "/sim/camera/color/camera_info")
@@ -378,8 +455,32 @@ class MaskDepthFusionNode(Node):
         self.declare_parameter("plane_min_points", 24)
         self.declare_parameter("plane_max_samples", 1024)
         self.declare_parameter("plane_normal_reference", [0.0, 0.0, 1.0])
+        self.declare_parameter("prompt_settle_sec", 0.8)
+        self.declare_parameter("enable_container_center_keypoint", True)
+        self.declare_parameter(
+            "container_center_prompt_keywords",
+            [
+                "tray",
+                "tray center",
+                "sorting tray",
+                "sorting tray center",
+                "plate",
+                "container",
+                "托盘",
+                "托盘中心",
+                "盘子",
+                "盘子中心",
+            ],
+        )
+        self.declare_parameter("container_center_inner_fraction", 0.55)
+        self.declare_parameter("container_center_z_percentile", 20.0)
+        self.declare_parameter("container_center_z_offset_m", 0.0)
+        self.declare_parameter("container_center_min_points", 48)
+        self.declare_parameter("container_center_expected_world", [0.0, 0.0, 0.0])
+        self.declare_parameter("container_center_expected_max_distance_m", 0.0)
 
         self.mask_topic = self.get_parameter("mask_topic").value
+        self.prompt_topic = str(self.get_parameter("prompt_topic").value)
         self.color_topic = self.get_parameter("color_topic").value
         self.depth_topic = self.get_parameter("depth_topic").value
         self.camera_info_topic = self.get_parameter("camera_info_topic").value
@@ -425,23 +526,47 @@ class MaskDepthFusionNode(Node):
         self.plane_cluster_radius_m = float(self.get_parameter("plane_cluster_radius_m").value)
         self.plane_min_points = max(3, int(self.get_parameter("plane_min_points").value))
         self.plane_max_samples = int(self.get_parameter("plane_max_samples").value)
-        self.plane_normal_reference = np.array(
-            [float(value) for value in self.get_parameter("plane_normal_reference").value][
-                :3
-            ],
-            dtype=np.float64,
+        self.plane_normal_reference = parse_float_vector(
+            self.get_parameter("plane_normal_reference").value,
+            [0.0, 0.0, 1.0],
         )
-        if self.plane_normal_reference.shape[0] < 3:
-            self.plane_normal_reference = np.pad(
-                self.plane_normal_reference,
-                (0, 3 - self.plane_normal_reference.shape[0]),
-            )
+        self.prompt_settle_sec = max(0.0, float(self.get_parameter("prompt_settle_sec").value))
+        self.enable_container_center_keypoint = bool(
+            self.get_parameter("enable_container_center_keypoint").value
+        )
+        self.container_center_prompt_keywords = tuple(
+            str(value).strip().lower()
+            for value in self.get_parameter("container_center_prompt_keywords").value
+            if str(value).strip()
+        )
+        self.container_center_inner_fraction = float(
+            self.get_parameter("container_center_inner_fraction").value
+        )
+        self.container_center_z_percentile = float(
+            self.get_parameter("container_center_z_percentile").value
+        )
+        self.container_center_z_offset_m = float(
+            self.get_parameter("container_center_z_offset_m").value
+        )
+        self.container_center_min_points = max(
+            4,
+            int(self.get_parameter("container_center_min_points").value),
+        )
+        self.container_center_expected_world = parse_float_vector(
+            self.get_parameter("container_center_expected_world").value,
+            [0.0, 0.0, 0.0],
+        )
+        self.container_center_expected_max_distance_m = max(
+            0.0,
+            float(self.get_parameter("container_center_expected_max_distance_m").value),
+        )
 
         qos = QoSProfile(depth=1)
         qos.reliability = ReliabilityPolicy.BEST_EFFORT
         qos.durability = DurabilityPolicy.VOLATILE
 
         self.sub_mask = self.create_subscription(Image, self.mask_topic, self.on_mask, qos)
+        self.sub_prompt = self.create_subscription(String, self.prompt_topic, self.on_prompt, 10)
         self.sub_color = self.create_subscription(Image, self.color_topic, self.on_color, qos)
         self.sub_depth = self.create_subscription(Image, self.depth_topic, self.on_depth, qos)
         self.sub_info = self.create_subscription(
@@ -497,8 +622,12 @@ class MaskDepthFusionNode(Node):
         self._stable_keypoint_xyz = None
         self._held_jump_count = 0
         self._invalid_count = 0
+        self.current_prompt = ""
+        self.prompt_changed_time = 0.0
 
-        self.get_logger().info("mask_depth_fusion_node started")
+        self.get_logger().info(
+            f"mask_depth_fusion_node started prompt_topic={self.prompt_topic}"
+        )
 
     def _log_status(self, message: str, *, level: str = "info"):
         now = time.time()
@@ -528,6 +657,22 @@ class MaskDepthFusionNode(Node):
         self._stable_keypoint_xyz = None
         self._held_jump_count = 0
         self._invalid_count = 0
+
+    def on_prompt(self, msg: String):
+        prompt = str(msg.data or "").strip()
+        with self.lock:
+            if prompt != self.current_prompt:
+                self.reset_stabilizer()
+                self.prompt_changed_time = time.time()
+            self.current_prompt = prompt
+
+    def _prompt_requests_container_center(self, prompt: str) -> bool:
+        if not self.enable_container_center_keypoint:
+            return False
+        lowered = str(prompt or "").lower()
+        if not lowered:
+            return False
+        return any(keyword in lowered for keyword in self.container_center_prompt_keywords)
 
     def select_candidate_index(self, candidates_xyz: np.ndarray, reference_xyz: np.ndarray):
         if candidates_xyz.shape[0] == 0:
@@ -712,6 +857,8 @@ class MaskDepthFusionNode(Node):
 
         with self.lock:
             score = self.latest_score
+            current_prompt = self.current_prompt
+            prompt_changed_time = self.prompt_changed_time
             color_pack = self._find_buffer_match(msg.header, self.color_buffer)
             depth_pack = self._find_buffer_match(msg.header, self.depth_buffer)
             info_pack = self._find_buffer_match(msg.header, self.info_buffer)
@@ -739,6 +886,23 @@ class MaskDepthFusionNode(Node):
             self._log_status("stale color frame", level="warn")
             self.publish_overlay(color_pack, lines=["stale color frame"], valid=False)
             self.publish_invalid()
+            return
+
+        prompt_settle_remaining = (
+            self.prompt_settle_sec - (time.time() - float(prompt_changed_time))
+            if prompt_changed_time > 0.0
+            else 0.0
+        )
+        if prompt_settle_remaining > 0.0:
+            self.publish_overlay(
+                color_pack,
+                lines=[
+                    f"prompt={current_prompt or '<none>'}",
+                    f"waiting prompt settle {prompt_settle_remaining:.2f}s",
+                ],
+                valid=False,
+            )
+            self.publish_invalid(clear_candidates=False)
             return
 
         if score < self.min_score:
@@ -813,6 +977,7 @@ class MaskDepthFusionNode(Node):
             return
 
         selected_candidate_xyz = candidates_xyz[primary_index]
+        container_center_active = self._prompt_requests_container_center(current_prompt)
         cam_to_world = None
         primary_world_xyz = None
         top_world = np.zeros((0, 3), dtype=np.float32)
@@ -827,7 +992,19 @@ class MaskDepthFusionNode(Node):
                 )
                 cam_to_world = transform_to_matrix(tf_msg)
 
-            if self.use_top_surface_estimator:
+            if container_center_active:
+                primary_xyz, primary_world_xyz, top_world = select_container_center_point(
+                    xyz_samples,
+                    cam_to_world,
+                    inner_fraction=self.container_center_inner_fraction,
+                    z_percentile=self.container_center_z_percentile,
+                    z_offset_m=self.container_center_z_offset_m,
+                    min_points=self.container_center_min_points,
+                    expected_world=self.container_center_expected_world,
+                    expected_max_distance_m=self.container_center_expected_max_distance_m,
+                )
+                candidate_select_state = "container_center"
+            elif self.use_top_surface_estimator:
                 local_radius = max(self.candidate_lock_radius_m, self.cluster_meanshift_bandwidth_m)
                 local_xy_dist = np.linalg.norm(
                     xyz_samples[:, :2] - selected_candidate_xyz[None, :2],
@@ -852,8 +1029,8 @@ class MaskDepthFusionNode(Node):
             top_world = np.zeros((0, 3), dtype=np.float32)
 
         if primary_xyz is None:
-            self._log_status("no top-surface point", level="warn")
-            self.publish_overlay(color_pack, lines=["no top-surface point"], valid=False)
+            self._log_status("no keypoint estimate", level="warn")
+            self.publish_overlay(color_pack, lines=["no keypoint estimate"], valid=False)
             self.publish_invalid(clear_candidates=False)
             return
 
@@ -941,6 +1118,7 @@ class MaskDepthFusionNode(Node):
             v=v,
             candidate_pixels=candidate_pixels,
             lines=[
+                f"prompt={current_prompt or '<none>'}",
                 f"candidates={candidates_xyz.shape[0]}",
                 f"surface_pts={top_world.shape[0]}",
                 f"candidate={candidate_select_state}",

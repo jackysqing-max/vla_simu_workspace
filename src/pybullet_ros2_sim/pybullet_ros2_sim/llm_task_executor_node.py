@@ -77,6 +77,10 @@ class LlmTaskExecutor(Node):
         self.declare_parameter("min_target_switch_distance_m", 0.08)
         self.declare_parameter("use_confirmed_static_target", True)
         self.declare_parameter("use_static_tray_center_target", False)
+        self.declare_parameter("prefer_visual_tray_center_keypoint", True)
+        self.declare_parameter("visual_tray_center_max_distance_m", 0.19)
+        self.declare_parameter("static_tray_center_fallback_sec", 3.0)
+        self.declare_parameter("force_static_tray_release_for_medical_objects", True)
         self.declare_parameter("static_tray_center_world", [0.555, 0.150, 0.351])
         self.declare_parameter("static_tray_plane_normal_world", [0.0, 0.0, 1.0])
         self.declare_parameter("static_target_override_topic", "/llm_task/static_target_override")
@@ -141,6 +145,19 @@ class LlmTaskExecutor(Node):
         )
         self.use_static_tray_center_target = bool(
             self.get_parameter("use_static_tray_center_target").value
+        )
+        self.prefer_visual_tray_center_keypoint = bool(
+            self.get_parameter("prefer_visual_tray_center_keypoint").value
+        )
+        self.visual_tray_center_max_distance_m = max(
+            0.0,
+            float(self.get_parameter("visual_tray_center_max_distance_m").value),
+        )
+        self.static_tray_center_fallback_sec = float(
+            self.get_parameter("static_tray_center_fallback_sec").value
+        )
+        self.force_static_tray_release_for_medical_objects = bool(
+            self.get_parameter("force_static_tray_release_for_medical_objects").value
         )
         self.static_tray_center_world = self._parameter_vector(
             "static_tray_center_world",
@@ -236,6 +253,7 @@ class LlmTaskExecutor(Node):
         self.last_completed_target_cam = None
         self.last_completed_target_frame = ""
         self.last_completed_static_target = False
+        self.held_object_prompt = ""
         self.step_confirmed_target_cam = None
         self.step_confirmed_target_frame = ""
         self.step_static_target = False
@@ -446,6 +464,28 @@ class LlmTaskExecutor(Node):
         )
         return any(keyword in lowered for keyword in keywords)
 
+    def _is_medical_target_prompt(self, prompt: str) -> bool:
+        lowered = str(prompt or "").lower()
+        keywords = (
+            "surgical instrument",
+            "instrument",
+            "scissors",
+            "forceps",
+            "scalpel",
+            "器械",
+            "剪刀",
+            "镊子",
+            "手术刀",
+        )
+        return any(keyword in lowered for keyword in keywords)
+
+    def _tray_visual_center_is_plausible(self, point_world) -> tuple[bool, float]:
+        if self.visual_tray_center_max_distance_m <= 0.0:
+            return True, 0.0
+        point = np.asarray(point_world, dtype=np.float64).reshape(3)
+        distance_xy = float(np.linalg.norm(point[:2] - self.static_tray_center_world[:2]))
+        return distance_xy <= self.visual_tray_center_max_distance_m, distance_xy
+
     def _static_target_for_step(self, step: dict):
         if not self.use_static_tray_center_target:
             return None
@@ -488,6 +528,7 @@ class LlmTaskExecutor(Node):
             self.last_completed_target_cam = None
             self.last_completed_target_frame = ""
             self.last_completed_static_target = False
+            self.held_object_prompt = ""
             self.step_confirmed_target_cam = None
             self.step_confirmed_target_frame = ""
             self.step_static_target = False
@@ -574,6 +615,10 @@ class LlmTaskExecutor(Node):
             self.last_completed_target_cam = np.array(self.step_confirmed_target_cam, copy=True)
             self.last_completed_target_frame = str(self.step_confirmed_target_frame)
             self.last_completed_static_target = bool(self.step_static_target)
+        if completed_step["action"] == "grasp_target":
+            self.held_object_prompt = str(completed_step.get("target_prompt", ""))
+        elif completed_step["action"] == "release_gripper":
+            self.held_object_prompt = ""
         self.step_cursor += 1
         self.step_started_ns = None
         self.step_satisfied_ns = None
@@ -748,11 +793,25 @@ class LlmTaskExecutor(Node):
                 else np.array(self.last_completed_target_cam, copy=True)
             )
             release_target_frame = str(self.last_completed_target_frame or "")
+            release_target_prompt = str(self.last_completed_target_prompt or "")
+            release_target_is_static = bool(self.last_completed_static_target)
             release_has_target = release_target_cam is not None and bool(release_target_frame)
             release_distance = None
+            force_static_tray_release = (
+                self.force_static_tray_release_for_medical_objects
+                and self._is_medical_target_prompt(self.held_object_prompt)
+                and not self._is_tray_target_prompt(release_target_prompt)
+            )
+
+            if force_static_tray_release:
+                release_target_cam = np.array(self.static_tray_center_world, copy=True)
+                release_target_frame = self.target_frame
+                release_target_prompt = "white sorting tray center"
+                release_target_is_static = True
+                release_has_target = True
 
             if release_has_target:
-                if self.last_completed_static_target:
+                if release_target_is_static:
                     self._publish_static_target_override(
                         release_target_cam,
                         self.static_tray_plane_normal_world,
@@ -890,21 +949,104 @@ class LlmTaskExecutor(Node):
             static_target = self._static_target_for_step(step)
             if static_target is not None:
                 static_point_world, static_normal_world = static_target
-                self.step_target_confirmed_ns = now_ns
-                self.step_satisfied_ns = None
-                self.step_confirmed_target_cam = np.array(static_point_world, copy=True)
-                self.step_confirmed_target_frame = self.target_frame
-                self.step_static_target = True
-                self._publish_static_target_override(static_point_world, static_normal_world)
-                self._set_tracking_enabled(True)
-                self.get_logger().info(
-                    f"[EXEC] step {step['step_index']} static tray center confirmed: "
-                    f"{static_point_world.tolist()}"
+                visual_ready = (
+                    self.prefer_visual_tray_center_keypoint
+                    and self._target_is_ready_for_current_step(
+                        step=step,
+                        target_valid=target_valid,
+                        target_cam=target_cam,
+                        target_header=target_header,
+                        target_received_ns=target_received_ns,
+                    )
                 )
-                self._publish_status(
-                    f"step_static_target_confirmed: {step['step_index']} "
-                    f"{step['target_prompt']}"
-                )
+                if visual_ready:
+                    try:
+                        visual_point_world = self._transform_point_to_target_frame(
+                            target_cam,
+                            "" if target_header is None else str(target_header.frame_id),
+                        )
+                        plausible, visual_distance_xy = self._tray_visual_center_is_plausible(
+                            visual_point_world
+                        )
+                        if not plausible:
+                            visual_ready = False
+                            self._publish_status_periodic(
+                                f"step_rejecting_tray_center_keypoint: {step['step_index']} "
+                                f"{step['target_prompt']} dist_xy={visual_distance_xy:.3f}m "
+                                f"max={self.visual_tray_center_max_distance_m:.3f}m",
+                                publish_on_change=False,
+                            )
+                    except Exception as exc:
+                        visual_ready = False
+                        self.get_logger().warning(
+                            f"[EXEC] tray visual center transform failed: {exc}"
+                        )
+
+                if visual_ready:
+                    self.step_target_confirmed_ns = now_ns
+                    self.step_satisfied_ns = None
+                    self.step_confirmed_target_cam = np.array(visual_point_world, copy=True)
+                    self.step_confirmed_target_frame = self.target_frame
+                    self.step_static_target = True
+                    self._publish_static_target_override(
+                        visual_point_world,
+                        static_normal_world,
+                    )
+                    self._set_tracking_enabled(True)
+                    self.get_logger().info(
+                        f"[EXEC] step {step['step_index']} visual tray center confirmed: "
+                        f"{np.asarray(visual_point_world).tolist()}"
+                    )
+                    self._publish_status(
+                        f"step_visual_tray_center_confirmed: {step['step_index']} "
+                        f"{step['target_prompt']}"
+                    )
+                else:
+                    elapsed_since_prompt = (
+                        0.0
+                        if self.step_prompt_sent_ns is None
+                        else (now_ns - self.step_prompt_sent_ns) * 1e-9
+                    )
+                    use_static_fallback = (
+                        not self.prefer_visual_tray_center_keypoint
+                        or self.static_tray_center_fallback_sec <= 0.0
+                        or elapsed_since_prompt >= self.static_tray_center_fallback_sec
+                    )
+                    if not use_static_fallback:
+                        wait_reason = self._target_wait_reason(
+                            step=step,
+                            target_valid=target_valid,
+                            target_cam=target_cam,
+                            target_header=target_header,
+                            target_received_ns=target_received_ns,
+                        )
+                        remaining = max(
+                            self.static_tray_center_fallback_sec - elapsed_since_prompt,
+                            0.0,
+                        )
+                        self._publish_status_periodic(
+                            f"step_waiting_tray_center_keypoint: {step['step_index']} "
+                            f"{step['target_prompt']} reason={wait_reason} "
+                            f"fallback_in={remaining:.1f}s",
+                            publish_on_change=False,
+                        )
+                        return
+
+                    self.step_target_confirmed_ns = now_ns
+                    self.step_satisfied_ns = None
+                    self.step_confirmed_target_cam = np.array(static_point_world, copy=True)
+                    self.step_confirmed_target_frame = self.target_frame
+                    self.step_static_target = True
+                    self._publish_static_target_override(static_point_world, static_normal_world)
+                    self._set_tracking_enabled(True)
+                    self.get_logger().info(
+                        f"[EXEC] step {step['step_index']} static tray center fallback: "
+                        f"{static_point_world.tolist()}"
+                    )
+                    self._publish_status(
+                        f"step_static_tray_center_fallback: {step['step_index']} "
+                        f"{step['target_prompt']}"
+                    )
             elif not self._target_is_ready_for_current_step(
                 step=step,
                 target_valid=target_valid,
