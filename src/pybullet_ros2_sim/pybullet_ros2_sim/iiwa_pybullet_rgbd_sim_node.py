@@ -33,7 +33,8 @@ from pybullet_ros2_sim.sim_camera import SimCameraConfig, SimRGBDCamera
 
 
 class IiwaPybulletRGBDSim(Node):
-    """Run a PyBullet world, publish RGB-D data, and accept the `/iiwa7/*` API.
+    """
+    Run a PyBullet world, publish RGB-D data, and accept the `/iiwa7/*` API.
 
     This node is the camera-enabled sibling of `iiwa_pybullet_sim_node`. It
     keeps the same public control topics so visual demos can still feed the
@@ -673,9 +674,18 @@ class IiwaPybulletRGBDSim(Node):
         half = max(float(self.keypoint_overlay_cross_size_m), 0.004) * 0.5
         line_width = 3.0 if self.gui else 1.0
         axes = (
-            ([point_world[0] - half, point_world[1], point_world[2]], [point_world[0] + half, point_world[1], point_world[2]]),
-            ([point_world[0], point_world[1] - half, point_world[2]], [point_world[0], point_world[1] + half, point_world[2]]),
-            ([point_world[0], point_world[1], point_world[2] - half], [point_world[0], point_world[1], point_world[2] + half]),
+            (
+                [point_world[0] - half, point_world[1], point_world[2]],
+                [point_world[0] + half, point_world[1], point_world[2]],
+            ),
+            (
+                [point_world[0], point_world[1] - half, point_world[2]],
+                [point_world[0], point_world[1] + half, point_world[2]],
+            ),
+            (
+                [point_world[0], point_world[1], point_world[2] - half],
+                [point_world[0], point_world[1], point_world[2] + half],
+            ),
         )
         for index, (start, end) in enumerate(axes):
             self._set_debug_line(index, start, end, [1.0, 0.86, 0.05], line_width)
@@ -979,9 +989,9 @@ class IiwaPybulletRGBDSim(Node):
                 if expected_size == len(data):
                     offset = 84
                     for _ in range(triangle_count):
-                        values = struct.unpack("<12fH", data[offset : offset + 50])
+                        values = struct.unpack("<12fH", data[offset:offset + 50])
                         for start in (3, 6, 9):
-                            _add_point(values[start : start + 3])
+                            _add_point(values[start:start + 3])
                         offset += 50
                     return mins, maxs
             text = data.decode("utf-8", errors="ignore")
@@ -1076,12 +1086,14 @@ class IiwaPybulletRGBDSim(Node):
             if bounds is None:
                 if collision_mode in ("box", "aabb_box", "primitive_box"):
                     self.get_logger().warning(
-                        f"[SCENE] collision='box' requested but mesh bounds failed; using mesh collision: {model_path}"
+                        f"[SCENE] collision='box' requested but mesh bounds failed; "
+                        f"using mesh collision: {model_path}"
                     )
                     collision_mode = "mesh"
                 if recenter_to_bounds:
                     self.get_logger().warning(
-                        f"[SCENE] recenter_to_bounds requested but mesh bounds failed; using raw mesh frame: {model_path}"
+                        "[SCENE] recenter_to_bounds requested but mesh bounds failed; "
+                        f"using raw mesh frame: {model_path}"
                     )
                     recenter_to_bounds = False
         base_position = None
@@ -1232,14 +1244,18 @@ class IiwaPybulletRGBDSim(Node):
 
         for index, config in enumerate(parsed, start=1):
             if not isinstance(config, dict):
-                self.get_logger().warning(f"[SCENE] external object #{index} is not an object; skipped")
+                self.get_logger().warning(
+                    f"[SCENE] external object #{index} is not an object; skipped"
+                )
                 continue
             name = str(config.get("name", f"external_{index}"))
             model_path = self._resolve_model_path(str(config.get("path", "")))
             if model_path is None:
                 self.get_logger().error(f"[SCENE] external object '{name}' path not found")
                 continue
-            model_type = str(config.get("type", os.path.splitext(model_path)[1].lstrip("."))).lower()
+            model_type = str(
+                config.get("type", os.path.splitext(model_path)[1].lstrip("."))
+            ).lower()
             fixed = bool(config.get("fixed", True))
             graspable = bool(config.get("graspable", False))
             try:
@@ -1275,7 +1291,8 @@ class IiwaPybulletRGBDSim(Node):
                     body_ids = self._spawn_external_mesh_object(model_path, config)
                 else:
                     self.get_logger().warning(
-                        f"[SCENE] external object '{name}' unsupported type '{model_type}'; skipped"
+                        f"[SCENE] external object '{name}' unsupported type "
+                        f"'{model_type}'; skipped"
                     )
                     continue
             except Exception as exc:
@@ -1286,7 +1303,8 @@ class IiwaPybulletRGBDSim(Node):
             if graspable:
                 if fixed:
                     self.get_logger().warning(
-                        f"[SCENE] external object '{name}' is fixed; not adding it to graspable objects"
+                        f"[SCENE] external object '{name}' is fixed; not adding it "
+                        "to graspable objects"
                     )
                 else:
                     self.graspable_object_ids.extend(body_ids)
@@ -1426,7 +1444,8 @@ class IiwaPybulletRGBDSim(Node):
 
         self._drive_franka_hand_gripper()
         self._publish_gripper_status(
-            "gripper_ready: franka_hand_urdf_open source=assets/franka_hand/franka_hand_gripper.urdf"
+            "gripper_ready: franka_hand_urdf_open "
+            "source=assets/franka_hand/franka_hand_gripper.urdf"
         )
 
     def _make_runtime_franka_hand_urdf(self, template_urdf):
@@ -2078,7 +2097,10 @@ class IiwaPybulletRGBDSim(Node):
                 obj_orn,
             )
             if self.gripper_keypoint_snap_to_center:
-                local_pos = tuple(float(value) for value in self.gripper_keypoint_snap_local_offset)
+                local_pos = tuple(
+                    float(value)
+                    for value in self.gripper_keypoint_snap_local_offset
+                )
                 _unused_pos, local_orn = p.multiplyTransforms(
                     inv_grasp_pos,
                     inv_grasp_orn,
@@ -2812,9 +2834,21 @@ class IiwaPybulletRGBDSim(Node):
         # Gauze pad with simple grid fibers.
         _box([0.070, 0.048, 0.006], gauze_rgba, (-0.230, 0.112), 0.012, -0.18)
         for line_offset in (-0.030, 0.0, 0.030):
-            _box([0.068, 0.002, 0.002], gauze_line_rgba, (-0.230, 0.112 + line_offset), 0.019, -0.18)
+            _box(
+                [0.068, 0.002, 0.002],
+                gauze_line_rgba,
+                (-0.230, 0.112 + line_offset),
+                0.019,
+                -0.18,
+            )
         for line_offset in (-0.040, 0.0, 0.040):
-            _box([0.002, 0.046, 0.002], gauze_line_rgba, (-0.230 + line_offset, 0.112), 0.020, -0.18)
+            _box(
+                [0.002, 0.046, 0.002],
+                gauze_line_rgba,
+                (-0.230 + line_offset, 0.112),
+                0.020,
+                -0.18,
+            )
 
         # Forceps/tweezers: two thin metallic arms with a small hinge.
         forceps_center = (-0.205, -0.118)
@@ -2831,7 +2865,10 @@ class IiwaPybulletRGBDSim(Node):
             _box(
                 [0.018, 0.006, 0.004],
                 dark_metal_rgba,
-                (forceps_center[0] - 0.072 * math.cos(angle), forceps_center[1] - 0.072 * math.sin(angle)),
+                (
+                    forceps_center[0] - 0.072 * math.cos(angle),
+                    forceps_center[1] - 0.072 * math.sin(angle),
+                ),
                 0.016,
                 angle,
             )
@@ -2856,8 +2893,24 @@ class IiwaPybulletRGBDSim(Node):
                 0.051,
                 theta + math.pi / 2.0,
             )
-        _sphere(0.006, metal_rgba, (needle_center[0] + needle_radius * math.cos(-1.08), needle_center[1] + needle_radius * math.sin(-1.08)), 0.052)
-        _sphere(0.004, dark_metal_rgba, (needle_center[0] + needle_radius * math.cos(0.80), needle_center[1] + needle_radius * math.sin(0.80)), 0.052)
+        _sphere(
+            0.006,
+            metal_rgba,
+            (
+                needle_center[0] + needle_radius * math.cos(-1.08),
+                needle_center[1] + needle_radius * math.sin(-1.08),
+            ),
+            0.052,
+        )
+        _sphere(
+            0.004,
+            dark_metal_rgba,
+            (
+                needle_center[0] + needle_radius * math.cos(0.80),
+                needle_center[1] + needle_radius * math.sin(0.80),
+            ),
+            0.052,
+        )
 
         # Suture thread leading away from the needle.
         for index, (offset_xy, yaw) in enumerate(
@@ -2937,7 +2990,8 @@ class IiwaPybulletRGBDSim(Node):
             loaded_count += len(body_ids)
 
         self.get_logger().info(
-            f"[SCENE] loaded {loaded_count} split silver surgical instrument assets for medical_grasp"
+            f"[SCENE] loaded {loaded_count} split silver surgical instrument assets "
+            "for medical_grasp"
         )
         return loaded_count > 0
 

@@ -221,7 +221,8 @@ def rekep_rgbd_candidates(
     rgb_weight: float,
     seed: int,
 ):
-    """Generate ReKep-style 3D proposal points from masked RGB-D samples.
+    """
+    Generate ReKep-style 3D proposal points from masked RGB-D samples.
 
     ReKep clusters dense feature samples inside a segmentation mask, then merges
     the resulting 3D proposals with mean shift. We approximate the same
@@ -241,7 +242,6 @@ def rekep_rgbd_candidates(
     keep_indices = evenly_spaced_subsample_indices(xyz.shape[0], max_samples)
     xyz_kept = xyz[keep_indices]
     rgb_kept = rgb[keep_indices]
-    uv_kept = uv[keep_indices]
 
     xyz_scale = max(float(np.std(xyz_kept)), 1e-6)
     features = np.concatenate(

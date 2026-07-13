@@ -15,6 +15,42 @@ SURGICAL_RCM_ACTIONS = (
     "establish_rcm",
     "execute_rcm_circle",
 )
+SURGICAL_RCM_STEP_DEFAULTS = {
+    "localize_rcm_port": {
+        "description": "Locate and lock the circular port center and insertion axis.",
+        "dwell_sec": 0.5,
+        "insertion_depth_m": 0.0,
+        "trajectory_radius_m": 0.0,
+        "trajectory_cycles": 0.0,
+    },
+    "align_tool_axis": {
+        "description": "Align the surgical tool axis with the locked insertion axis.",
+        "dwell_sec": 0.5,
+        "insertion_depth_m": 0.0,
+        "trajectory_radius_m": 0.0,
+        "trajectory_cycles": 0.0,
+    },
+    "establish_rcm": {
+        "description": (
+            "Insert through the port and establish the port center as "
+            "the fixed RCM point."
+        ),
+        "dwell_sec": 0.8,
+        "insertion_depth_m": 0.077,
+        "trajectory_radius_m": 0.0,
+        "trajectory_cycles": 0.0,
+    },
+    "execute_rcm_circle": {
+        "description": (
+            "Follow a circular tool-tip trajectory while keeping the "
+            "RCM point fixed."
+        ),
+        "dwell_sec": 0.0,
+        "insertion_depth_m": 0.077,
+        "trajectory_radius_m": 0.020,
+        "trajectory_cycles": 1.0,
+    },
+}
 SUPPORTED_TARGET_PROMPTS = (
     "red cube",
     "green cube",
@@ -144,7 +180,8 @@ _OPEN_VOCAB_WAIT_SECONDS_PATTERN = re.compile(
 _OPEN_VOCAB_TARGET_PATTERNS = (
     re.compile(
         r"(?:hover above|hover over|move above|move over|go to|move to|approach|track|follow|"
-        r"find|locate|look for|search for|target|grasp|grab|pick up|pick|hold|clamp)\s+(?P<target>.+)$",
+        r"find|locate|look for|search for|target|grasp|grab|pick up|pick|"
+        r"hold|clamp)\s+(?P<target>.+)$",
         flags=re.IGNORECASE,
     ),
     re.compile(
@@ -350,50 +387,9 @@ def _canonicalize_surgical_rcm_steps(steps: list[dict]) -> list[dict]:
     if not steps:
         return []
 
-    defaults = {
-        "localize_rcm_port": {
-            "description": "Locate and lock the circular port center and insertion axis.",
-            "success_radius_m": 0.006,
-            "dwell_sec": 0.5,
-            "insertion_depth_m": 0.0,
-            "trajectory_radius_m": 0.0,
-            "trajectory_cycles": 0.0,
-        },
-        "align_tool_axis": {
-            "description": "Align the surgical tool axis with the locked insertion axis.",
-            "success_radius_m": 0.006,
-            "dwell_sec": 0.5,
-            "insertion_depth_m": 0.0,
-            "trajectory_radius_m": 0.0,
-            "trajectory_cycles": 0.0,
-        },
-        "establish_rcm": {
-            "description": (
-                "Insert through the port and establish the port center as "
-                "the fixed RCM point."
-            ),
-            "success_radius_m": 0.006,
-            "dwell_sec": 0.8,
-            "insertion_depth_m": 0.077,
-            "trajectory_radius_m": 0.0,
-            "trajectory_cycles": 0.0,
-        },
-        "execute_rcm_circle": {
-            "description": (
-                "Follow a circular tool-tip trajectory while keeping the "
-                "RCM point fixed."
-            ),
-            "success_radius_m": 0.006,
-            "dwell_sec": 0.0,
-            "insertion_depth_m": 0.077,
-            "trajectory_radius_m": 0.020,
-            "trajectory_cycles": 1.0,
-        },
-    }
-
     canonical = []
     for index, action in enumerate(SURGICAL_RCM_ACTIONS, start=1):
-        default = defaults[action]
+        default = SURGICAL_RCM_STEP_DEFAULTS[action]
         canonical.append(
             {
                 "step_index": index,
@@ -404,7 +400,7 @@ def _canonicalize_surgical_rcm_steps(steps: list[dict]) -> list[dict]:
                     else ""
                 ),
                 "description": default["description"],
-                "success_radius_m": default["success_radius_m"],
+                "success_radius_m": 0.006,
                 "dwell_sec": default["dwell_sec"],
                 "wait_sec": 0.0,
                 "insertion_depth_m": default["insertion_depth_m"],
@@ -775,66 +771,8 @@ def _infer_surgical_rcm_plan_from_instruction(
                 "Perception locks the port pose before any robot motion."
             ),
             "steps": [
-                {
-                    "step_index": 1,
-                    "action": "localize_rcm_port",
-                    "target_prompt": "circular hole",
-                    "description": (
-                        "Locate and lock the circular port center and "
-                        "insertion axis."
-                    ),
-                    "success_radius_m": 0.006,
-                    "dwell_sec": 0.5,
-                    "wait_sec": 0.0,
-                    "insertion_depth_m": 0.0,
-                    "trajectory_radius_m": 0.0,
-                    "trajectory_cycles": 0.0,
-                },
-                {
-                    "step_index": 2,
-                    "action": "align_tool_axis",
-                    "target_prompt": "circular hole",
-                    "description": (
-                        "Align the surgical tool with the locked insertion "
-                        "axis at the pre-insertion pose."
-                    ),
-                    "success_radius_m": 0.006,
-                    "dwell_sec": 0.5,
-                    "wait_sec": 0.0,
-                    "insertion_depth_m": 0.0,
-                    "trajectory_radius_m": 0.0,
-                    "trajectory_cycles": 0.0,
-                },
-                {
-                    "step_index": 3,
-                    "action": "establish_rcm",
-                    "target_prompt": "circular hole",
-                    "description": (
-                        "Insert along the locked axis and establish the port "
-                        "center as the fixed RCM point."
-                    ),
-                    "success_radius_m": 0.006,
-                    "dwell_sec": 0.8,
-                    "wait_sec": 0.0,
-                    "insertion_depth_m": 0.077,
-                    "trajectory_radius_m": 0.0,
-                    "trajectory_cycles": 0.0,
-                },
-                {
-                    "step_index": 4,
-                    "action": "execute_rcm_circle",
-                    "target_prompt": "",
-                    "description": (
-                        "Track a circular tool-tip trajectory while keeping "
-                        "the RCM point fixed."
-                    ),
-                    "success_radius_m": 0.006,
-                    "dwell_sec": 0.0,
-                    "wait_sec": 0.0,
-                    "insertion_depth_m": 0.077,
-                    "trajectory_radius_m": 0.020,
-                    "trajectory_cycles": 1.0,
-                },
+                {"step_index": index, "action": action}
+                for index, action in enumerate(SURGICAL_RCM_ACTIONS, start=1)
             ],
         },
         allow_open_vocabulary=True,

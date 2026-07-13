@@ -101,7 +101,7 @@ def _extract_json_object(text: str) -> dict:
         elif char == "}":
             depth -= 1
             if depth == 0:
-                candidate = cleaned[start : index + 1]
+                candidate = cleaned[start:index + 1]
                 parsed = json.loads(candidate)
                 if isinstance(parsed, dict):
                     return parsed
@@ -165,7 +165,11 @@ class LlmTaskPlanner(Node):
         self.allow_local_fallback = bool(
             self.get_parameter("allow_local_fallback").value
         )
-        self.latest_scene_registry = {"target_frame": "world", "updated_at_sec": 0.0, "objects": []}
+        self.latest_scene_registry = {
+            "target_frame": "world",
+            "updated_at_sec": 0.0,
+            "objects": [],
+        }
 
         plan_qos = QoSProfile(
             depth=1,
@@ -229,7 +233,8 @@ class LlmTaskPlanner(Node):
         if self.api_key_required:
             if self.api_key_env_var:
                 raise RuntimeError(
-                    f"Missing API key: set parameter api_key or environment variable {self.api_key_env_var}"
+                    "Missing API key: set parameter api_key or environment variable "
+                    f"{self.api_key_env_var}"
                 )
             raise RuntimeError("Missing API key: set parameter api_key")
         return ""
@@ -332,25 +337,36 @@ class LlmTaskPlanner(Node):
                     "2) grasp one target object by closing a parallel gripper, "
                     "3) release the gripper, "
                     "4) wait for a short duration. "
-                    "Use action='hover_target' when the robot should move above or inspect an object. "
+                    "Use action='hover_target' when the robot should move above or "
+                    "inspect an object. "
                     "Use action='grasp_target' when the robot should pick up or hold an object. "
-                    "Use action='release_gripper' when the robot should open the gripper or drop/release. "
+                    "Use action='release_gripper' when the robot should open the gripper "
+                    "or drop/release. "
                     "Use action='wait' when the robot should pause. "
                     "For pick-and-place or sorting tasks, always use this order: "
-                    "grasp_target for the object, then hover_target for the destination container/tray center, "
+                    "grasp_target for the object, then hover_target for the destination "
+                    "container/tray center, "
                     "then release_gripper. Never release before moving above the destination. "
-                    "For hover_target and grasp_target steps, set target_prompt to a concise object phrase "
+                    "For hover_target and grasp_target steps, set target_prompt to a "
+                    "concise object phrase "
                     "that can be sent directly to a text-conditioned segmentation model, such as "
-                    "left silver surgical instrument, right silver surgical instrument, silver surgical instrument, white sorting tray center, gauze pad, curved needle, or red entry point. "
-                    "Preserve spatial qualifiers such as left, middle, right, front, and back when the user includes them. "
-                    "Every step must include step_index starting at 1, target_prompt, description, "
+                    "left silver surgical instrument, right silver surgical instrument, "
+                    "silver surgical instrument, white sorting tray center, gauze pad, "
+                    "curved needle, or red entry point. "
+                    "Preserve spatial qualifiers such as left, middle, right, front, and "
+                    "back when the user includes them. "
+                    "Every step must include step_index starting at 1, target_prompt, "
+                    "description, "
                     "success_radius_m, dwell_sec, and wait_sec. "
                     "For grasp_target steps, keep dwell_sec around 1.0 and wait_sec=0.0. "
-                    "For release_gripper and wait steps, set target_prompt='' and success_radius_m=0.0. "
-                    "Use the scene summary as helpful context, but if it is empty or does not yet list "
-                    "the requested object, still create target steps from the user's object phrase because "
+                    "For release_gripper and wait steps, set target_prompt='' and "
+                    "success_radius_m=0.0. "
+                    "Use the scene summary as helpful context, but if it is empty or "
+                    "does not yet list the requested object, still create target steps "
+                    "from the user's object phrase because "
                     "perception will ground the prompt during execution. "
-                    "Do not invent fine manipulation or cutting actions; represent them as hover, grasp, "
+                    "Do not invent fine manipulation or cutting actions; represent them "
+                    "as hover, grasp, "
                     "release, and wait primitives."
                 )
             return (
@@ -363,7 +379,8 @@ class LlmTaskPlanner(Node):
                 "Use action='hover_target' when the step should move above an object. "
                 "Use action='wait' when the robot should pause. "
                 "For hover steps, set target_prompt to a concise object phrase that can be sent "
-                "directly to a text-conditioned segmentation model, such as mug, scissors, bottle, "
+                "directly to a text-conditioned segmentation model, such as mug, "
+                "scissors, bottle, "
                 "phone, book, or blue cup. "
                 "Every hover_target step must include step_index starting at 1, "
                 "description, success_radius_m=0.0, dwell_sec=1.0, and wait_sec=0.0. "
@@ -374,7 +391,8 @@ class LlmTaskPlanner(Node):
                 "list the requested object, still create a hover_target step from the user's "
                 "object phrase because perception will ground the prompt during execution. "
                 "If the user asks for unsupported actions like grasping or stacking, "
-                "decompose only the observable hover sequence and mention the limitation in planning_notes. "
+                "decompose only the observable hover sequence and mention the limitation "
+                "in planning_notes. "
             )
 
         supported_targets = ", ".join(SUPPORTED_TARGET_PROMPTS)
@@ -389,7 +407,8 @@ class LlmTaskPlanner(Node):
             "Use action='hover_target' when the step should move above an object. "
             "Use action='wait' when the robot should pause. "
             "If the user asks for unsupported actions like grasping or stacking, "
-            "decompose only the observable hover sequence and mention the limitation in planning_notes. "
+            "decompose only the observable hover sequence and mention the limitation "
+            "in planning_notes. "
             "Use the scene summary to decide which objects are currently visible and grounded. "
             "Return JSON only."
         )
@@ -403,7 +422,8 @@ class LlmTaskPlanner(Node):
             payload = self._build_chat_completions_payload(instruction_text)
         else:
             raise ValueError(
-                f"Unsupported api_protocol={self.api_protocol!r}; use 'responses' or 'chat_completions'"
+                f"Unsupported api_protocol={self.api_protocol!r}; use 'responses' or "
+                "'chat_completions'"
             )
 
         request = urllib.request.Request(
@@ -435,11 +455,14 @@ class LlmTaskPlanner(Node):
                 return plan, False
             if not self.allow_local_fallback:
                 self.get_logger().error(
-                    "[PLAN] LLM returned no executable steps after sanitization; local fallback is disabled"
+                    "[PLAN] LLM returned no executable steps after sanitization; local "
+                    "fallback is disabled"
                 )
                 return {
                     "task_summary": instruction,
-                    "planning_notes": "LLM returned no executable steps and local fallback is disabled.",
+                    "planning_notes": (
+                        "LLM returned no executable steps and local fallback is disabled."
+                    ),
                     "steps": [],
                 }, False
             self.get_logger().warning(

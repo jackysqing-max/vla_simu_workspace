@@ -156,7 +156,11 @@ class SceneObjectRegistry(Node):
             prompt = self.current_prompt
             score = float(self.current_score)
             target_valid = bool(self.target_valid)
-            point_cam = None if self.latest_keypoint is None else np.array(self.latest_keypoint, copy=True)
+            point_cam = (
+                None
+                if self.latest_keypoint is None
+                else np.array(self.latest_keypoint, copy=True)
+            )
             header = self.latest_keypoint_header
 
         label = normalize_target_prompt(
@@ -258,7 +262,10 @@ class SceneObjectRegistry(Node):
 
         status_msg = String()
         visible_count = sum(1 for item in scene["objects"] if bool(item.get("visible", False)))
-        status_msg.data = f"scene_registry: {visible_count} visible / {len(scene['objects'])} total"
+        status_msg.data = (
+            f"scene_registry: {visible_count} visible / "
+            f"{len(scene['objects'])} total"
+        )
         self.pub_status.publish(status_msg)
 
 

@@ -11,6 +11,7 @@ from std_msgs.msg import Float32MultiArray
 class UdpReceiverNode(Node):
     """
     Receive UDP datagrams and publish parsed float array to /udp/data.
+
     Expected payload format (default): "v1,v2,v3,..."
     """
 
@@ -28,7 +29,11 @@ class UdpReceiverNode(Node):
         port = self.get_parameter('port').get_parameter_value().integer_value
         self.delimiter = self.get_parameter('delimiter').get_parameter_value().string_value
         self.topic = self.get_parameter('topic').get_parameter_value().string_value
-        self.max_bytes = self.get_parameter('max_datagram_bytes').get_parameter_value().integer_value
+        self.max_bytes = (
+            self.get_parameter('max_datagram_bytes')
+            .get_parameter_value()
+            .integer_value
+        )
 
         self.pub = self.create_publisher(Float32MultiArray, self.topic, 10)
 
@@ -41,7 +46,10 @@ class UdpReceiverNode(Node):
         # Poll at high rate (non-blocking)
         self.timer = self.create_timer(0.001, self.poll_socket)  # 1 kHz polling
 
-        self.get_logger().info(f"UDP receiver started. bind={bind_ip}:{port}, topic={self.topic}, delimiter='{self.delimiter}'")
+        self.get_logger().info(
+            f"UDP receiver started. bind={bind_ip}:{port}, "
+            f"topic={self.topic}, delimiter='{self.delimiter}'"
+        )
 
     def parse_payload(self, data: bytes) -> List[float]:
         text = data.decode('utf-8', errors='ignore').strip()

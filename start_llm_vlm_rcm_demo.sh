@@ -2,6 +2,7 @@
 set -euo pipefail
 
 WS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKSPACE_PARENT="$(dirname "$WS")"
 LOG_DIR="$WS/run_logs"
 PID_DIR="$WS/run_pids"
 MODE_FILE="$PID_DIR/llm_vlm_rcm_mode.txt"
@@ -9,7 +10,7 @@ MODE_FILE="$PID_DIR/llm_vlm_rcm_mode.txt"
 LLM_BACKEND="${LLM_BACKEND:-qwen3_local}"
 GPU_EXECUTION_MODE="${GPU_EXECUTION_MODE:-staged_single_gpu}"
 QWEN3_AUTO_START="${QWEN3_AUTO_START:-true}"
-QWEN3_VENV="${QWEN3_VENV:-/home/siqin/ros2_workspaces/humble/.venvs/qwen3-vllm}"
+QWEN3_VENV="${QWEN3_VENV:-$WORKSPACE_PARENT/.venvs/qwen3-vllm}"
 QWEN_MODEL="${QWEN_MODEL:-Qwen/Qwen3-4B}"
 QWEN3_PORT="${QWEN3_PORT:-8000}"
 QWEN3_READY_TIMEOUT_SEC="${QWEN3_READY_TIMEOUT_SEC:-240}"

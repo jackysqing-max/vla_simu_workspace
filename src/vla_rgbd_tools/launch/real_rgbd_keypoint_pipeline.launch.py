@@ -145,7 +145,10 @@ def generate_launch_description():
             DeclareLaunchArgument("container_center_z_percentile", default_value="20.0"),
             DeclareLaunchArgument("container_center_z_offset_m", default_value="0.0"),
             DeclareLaunchArgument("container_center_min_points", default_value="48"),
-            DeclareLaunchArgument("container_center_expected_world", default_value="[0.0,0.0,0.0]"),
+            DeclareLaunchArgument(
+                "container_center_expected_world",
+                default_value="[0.0,0.0,0.0]",
+            ),
             DeclareLaunchArgument("container_center_expected_max_distance_m", default_value="0.0"),
             DeclareLaunchArgument("monitor_keypoint_timeout_sec", default_value="1.0"),
             DeclareLaunchArgument("viewer_cloud_stride", default_value="2"),

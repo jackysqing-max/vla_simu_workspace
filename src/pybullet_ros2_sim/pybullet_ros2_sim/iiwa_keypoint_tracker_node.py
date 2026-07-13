@@ -576,7 +576,11 @@ class IiwaKeypointTracker(Node):
                     opening_axis = normalize_vector(
                         rotate_about_axis(plane_tangent, normal, self.grasp_yaw_offset_rad)
                     )
-                if opening_axis is None and self.object_yaw_rad is not None and self._object_yaw_is_fresh():
+                if (
+                    opening_axis is None
+                    and self.object_yaw_rad is not None
+                    and self._object_yaw_is_fresh()
+                ):
                     target_yaw = normalize_angle(self.object_yaw_rad + self.grasp_yaw_offset_rad)
                     opening_axis = np.array(
                         [math.cos(target_yaw), math.sin(target_yaw), 0.0],
@@ -844,10 +848,14 @@ class IiwaKeypointTracker(Node):
                 if self.lock_target_on_tracking_enable:
                     self.locked_target_cam = np.array(target_cam, copy=True)
                     self.locked_target_header = header
-                    if plane_normal is not None and self._vector_is_fresh(plane_normal_received_ns):
+                    if plane_normal is not None and self._vector_is_fresh(
+                        plane_normal_received_ns
+                    ):
                         self.locked_plane_normal = np.array(plane_normal, copy=True)
                         self.locked_plane_normal_header = plane_normal_header
-                    if plane_tangent is not None and self._vector_is_fresh(plane_tangent_received_ns):
+                    if plane_tangent is not None and self._vector_is_fresh(
+                        plane_tangent_received_ns
+                    ):
                         self.locked_plane_tangent = np.array(plane_tangent, copy=True)
                         self.locked_plane_tangent_header = plane_tangent_header
                     using_locked_target = True
@@ -921,7 +929,9 @@ class IiwaKeypointTracker(Node):
             and self.require_object_plane_frame
             and plane_normal_world is None
         ):
-            self._publish_status(f"waiting_object_plane_normal topic={self.object_plane_normal_topic}")
+            self._publish_status(
+                f"waiting_object_plane_normal topic={self.object_plane_normal_topic}"
+            )
             return
         if self.use_object_plane_frame and self._vector_is_fresh(plane_tangent_received_ns):
             plane_tangent_world = self._vector_in_target_frame(plane_tangent, plane_tangent_header)

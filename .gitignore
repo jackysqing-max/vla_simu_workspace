@@ -26,6 +26,13 @@ env/
 .env
 .codex
 start_llm_rekep_demo.local.sh
+torchinductor_*/
+
+# ===== Local private/reference material =====
+# Legacy touchless prototypes, medical volumes, papers, and experiment output
+# are intentionally kept outside the public source release.
+src/touchless_project/
+touchless_project/
 
 # ===== IDE =====
 .vscode/

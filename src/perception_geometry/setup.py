@@ -23,7 +23,8 @@ setup(
     entry_points={
         'console_scripts': [
             'mask_depth_fusion_node = perception_geometry.mask_depth_fusion_node:main',
-            'give_me_scissors_keypoint_node = perception_geometry.give_me_scissors_keypoint_node:main',
+            'give_me_scissors_keypoint_node = '
+            'perception_geometry.give_me_scissors_keypoint_node:main',
         ],
     },
 )

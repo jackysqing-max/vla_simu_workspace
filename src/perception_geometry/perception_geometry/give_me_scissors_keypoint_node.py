@@ -42,7 +42,8 @@ from perception_geometry.ros_msg_utils import (
 
 
 class GiveMeScissorsKeypointNode(Node):
-    """Publish indexed candidate keypoints from segmented RGB-D observations.
+    """
+    Publish indexed candidate keypoints from segmented RGB-D observations.
 
     This node mirrors the key idea in Give-me-scissors/ReKep: produce a compact
     set of numbered 3D candidate keypoints from visual features inside a mask,
@@ -316,7 +317,13 @@ class GiveMeScissorsKeypointNode(Node):
         self.pub_metadata.publish(msg)
         if rgb is not None:
             overlay = rgb.copy()
-            cv2.rectangle(overlay, (0, 0), (overlay.shape[1] - 1, overlay.shape[0] - 1), (255, 0, 0), 3)
+            cv2.rectangle(
+                overlay,
+                (0, 0),
+                (overlay.shape[1] - 1, overlay.shape[0] - 1),
+                (255, 0, 0),
+                3,
+            )
             cv2.putText(
                 overlay,
                 text,
@@ -376,7 +383,11 @@ class GiveMeScissorsKeypointNode(Node):
                 continue
             member_embedding = embedding[member_indices]
             center = centers[cluster_index]
-            closest_local = int(np.argmin(np.linalg.norm(member_embedding - center[None, :], axis=1)))
+            closest_local = int(
+                np.argmin(
+                    np.linalg.norm(member_embedding - center[None, :], axis=1)
+                )
+            )
             sample_index = int(member_indices[closest_local])
             proposals.append(
                 {
@@ -594,7 +605,15 @@ class GiveMeScissorsKeypointNode(Node):
         msg.data = json.dumps(payload, ensure_ascii=False)
         self.pub_metadata.publish(msg)
 
-    def _draw_overlay(self, rgb, mask_u8, candidates, selected_index, status_lines, selected_uv=None):
+    def _draw_overlay(
+        self,
+        rgb,
+        mask_u8,
+        candidates,
+        selected_index,
+        status_lines,
+        selected_uv=None,
+    ):
         overlay = rgb.copy()
         if mask_u8 is not None and mask_u8.shape[:2] == overlay.shape[:2]:
             mask_bool = mask_u8 > 0

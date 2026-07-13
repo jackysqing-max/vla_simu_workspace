@@ -168,7 +168,8 @@ class MaskDepthToCloudNode(Node):
 
             if self.latest_mask.shape != depth_m.shape:
                 self.get_logger().warn(
-                    f"Mask shape {self.latest_mask.shape} does not match depth shape {depth_m.shape}. "
+                    f"Mask shape {self.latest_mask.shape} does not match depth "
+                    f"shape {depth_m.shape}. "
                     "Check whether SAM3 mask is generated from aligned RGB resolution."
                 )
                 return

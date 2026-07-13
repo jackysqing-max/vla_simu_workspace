@@ -1,7 +1,7 @@
 """ROS message builders used by the perception fusion node."""
 
 from geometry_msgs.msg import PointStamped
-from sensor_msgs.msg import PointCloud2, PointField
+from sensor_msgs.msg import PointField
 from sensor_msgs_py import point_cloud2
 from std_msgs.msg import Bool, Float32
 

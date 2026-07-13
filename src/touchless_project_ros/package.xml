@@ -9,7 +9,6 @@
 
   <buildtool_depend>ament_python</buildtool_depend>
 
-  <depend>ament_index_python</depend>
   <depend>geometry_msgs</depend>
   <depend>iiwa_cpp_controller</depend>
   <depend>iiwa_state_udp_bridge</depend>

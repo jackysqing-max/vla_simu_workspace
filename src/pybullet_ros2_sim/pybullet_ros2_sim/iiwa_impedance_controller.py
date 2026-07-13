@@ -13,7 +13,8 @@ from std_msgs.msg import Float64MultiArray
 
 
 class IiwaImpedanceController(Node):
-    """Compute torque commands from joint state and joint-space targets.
+    """
+    Compute torque commands from joint state and joint-space targets.
 
     The control law is intentionally simple and well-bounded:
     1. PD impedance in joint space

@@ -147,7 +147,8 @@ def select_top_surface_point(
     min_fraction: float,
     surface_percentile: float,
 ):
-    """Estimate the center of the visible top surface in camera coordinates.
+    """
+    Estimate the center of the visible top surface in camera coordinates.
 
     We convert the masked cloud into the world frame, take the points near the
     maximum world `z`, and average that slice. This yields a point on the cube's
@@ -678,12 +679,17 @@ class MaskDepthFusionNode(Node):
         if candidates_xyz.shape[0] == 0:
             return None, "none"
 
-        if self._stable_keypoint_xyz is not None and np.all(np.isfinite(self._stable_keypoint_xyz)):
+        if self._stable_keypoint_xyz is not None and np.all(
+            np.isfinite(self._stable_keypoint_xyz)
+        ):
             previous = self._stable_keypoint_xyz.astype(np.float32)
             distances = np.linalg.norm(candidates_xyz - previous[None, :], axis=1)
             nearest_index = int(np.argmin(distances))
             nearest_distance = float(distances[nearest_index])
-            if self.candidate_lock_radius_m <= 0.0 or nearest_distance <= self.candidate_lock_radius_m:
+            if (
+                self.candidate_lock_radius_m <= 0.0
+                or nearest_distance <= self.candidate_lock_radius_m
+            ):
                 return nearest_index, f"locked:{nearest_distance:.3f}m"
 
         primary_index = select_primary_candidate(candidates_xyz, reference_xyz)
@@ -848,7 +854,9 @@ class MaskDepthFusionNode(Node):
 
         if best_payload is None:
             return None
-        if self.max_frame_age_sec > 0.0 and (best_age is None or best_age > self.max_frame_age_sec):
+        if self.max_frame_age_sec > 0.0 and (
+            best_age is None or best_age > self.max_frame_age_sec
+        ):
             return None
         return best_payload, best_header
 
@@ -876,7 +884,9 @@ class MaskDepthFusionNode(Node):
             self.publish_invalid()
             return
 
-        if not self._headers_are_aligned(msg.header, depth_pack[1]) or not self._headers_are_aligned(msg.header, info.header):
+        if not self._headers_are_aligned(
+            msg.header, depth_pack[1]
+        ) or not self._headers_are_aligned(msg.header, info.header):
             self._log_status("stale depth or camera_info", level="warn")
             self.publish_overlay(color_pack, lines=["stale depth or camera_info"], valid=False)
             self.publish_invalid()
@@ -1005,13 +1015,20 @@ class MaskDepthFusionNode(Node):
                 )
                 candidate_select_state = "container_center"
             elif self.use_top_surface_estimator:
-                local_radius = max(self.candidate_lock_radius_m, self.cluster_meanshift_bandwidth_m)
+                local_radius = max(
+                    self.candidate_lock_radius_m,
+                    self.cluster_meanshift_bandwidth_m,
+                )
                 local_xy_dist = np.linalg.norm(
                     xyz_samples[:, :2] - selected_candidate_xyz[None, :2],
                     axis=1,
                 )
                 local_mask = local_xy_dist <= max(local_radius, 1e-4)
-                top_input_xyz = xyz_samples[local_mask] if int(np.count_nonzero(local_mask)) >= 32 else xyz_samples
+                top_input_xyz = (
+                    xyz_samples[local_mask]
+                    if int(np.count_nonzero(local_mask)) >= 32
+                    else xyz_samples
+                )
                 primary_xyz, primary_world_xyz, top_world = select_top_surface_point(
                     top_input_xyz,
                     cam_to_world,

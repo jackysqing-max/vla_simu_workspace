@@ -38,7 +38,8 @@ def min_jerk_s(u: float) -> float:
 
 
 class IiwaPybulletSim(Node):
-    """Expose the main `/iiwa7/*` control contract on top of PyBullet.
+    """
+    Expose the main `/iiwa7/*` control contract on top of PyBullet.
 
     The node owns the physics world and accepts two kinds of commands:
     - `/iiwa7/joint_desired` in position mode

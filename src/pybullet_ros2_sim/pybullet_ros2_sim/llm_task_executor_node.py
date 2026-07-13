@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import json
 import threading
 
 import numpy as np
@@ -610,7 +609,10 @@ class LlmTaskExecutor(Node):
     def _advance_step(self):
         assert self.plan is not None
         completed_step = self.plan["steps"][self.step_cursor]
-        if completed_step["action"] in ("hover_target", "grasp_target") and self.step_confirmed_target_cam is not None:
+        if (
+            completed_step["action"] in ("hover_target", "grasp_target")
+            and self.step_confirmed_target_cam is not None
+        ):
             self.last_completed_target_prompt = str(completed_step.get("target_prompt", ""))
             self.last_completed_target_cam = np.array(self.step_confirmed_target_cam, copy=True)
             self.last_completed_target_frame = str(self.step_confirmed_target_frame)
@@ -846,7 +848,9 @@ class LlmTaskExecutor(Node):
                                 control_pos
                                 + quat_to_matrix(ee_orn) @ self.gripper_center_offset_link6
                             )
-                        release_distance = float(np.linalg.norm(control_pos - release_target_world))
+                        release_distance = float(
+                            np.linalg.norm(control_pos - release_target_world)
+                        )
                     except Exception as exc:
                         self.get_logger().warn(f"[EXEC] release target TF/FK failed: {exc}")
             else:
@@ -1397,7 +1401,11 @@ class LlmTaskExecutor(Node):
                     dwell_elapsed=dwell_elapsed,
                     target_valid=target_valid,
                     target_fresh=target_fresh,
-                    reason="inside_radius_confirmed_hold" if using_confirmed_target else "inside_radius",
+                    reason=(
+                        "inside_radius_confirmed_hold"
+                        if using_confirmed_target
+                        else "inside_radius"
+                    ),
                 ),
                 publish_on_change=False,
             )
@@ -1413,7 +1421,11 @@ class LlmTaskExecutor(Node):
                     dwell_elapsed=0.0,
                     target_valid=target_valid,
                     target_fresh=target_fresh,
-                    reason="outside_radius_confirmed_hold" if using_confirmed_target else "outside_radius",
+                    reason=(
+                        "outside_radius_confirmed_hold"
+                        if using_confirmed_target
+                        else "outside_radius"
+                    ),
                 ),
                 publish_on_change=False,
             )

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-WS="/home/siqin/ros2_workspaces/humble/ros2_pybullet_ws"
+WS="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 MODE="${1:-rcm}"
 
 case "$MODE" in

@@ -143,7 +143,12 @@ class TrackingOverlayViewerNode(Node):
 
         self.create_subscription(Image, self.color_topic, self.on_color, image_qos)
         self.create_subscription(Image, self.depth_topic, self.on_depth, image_qos)
-        self.create_subscription(CameraInfo, self.camera_info_topic, self.on_camera_info, image_qos)
+        self.create_subscription(
+            CameraInfo,
+            self.camera_info_topic,
+            self.on_camera_info,
+            image_qos,
+        )
         self.create_subscription(Image, self.mask_topic, self.on_mask, image_qos)
         self.create_subscription(Image, self.overlay_topic, self.on_overlay, image_qos)
         self.create_subscription(PointCloud2, self.points_topic, self.on_points, 1)
@@ -325,7 +330,11 @@ class TrackingOverlayViewerNode(Node):
                 else np.array(self.keypoint_xyz, copy=True)
             )
             keypoint_header = self.keypoint_header
-            keypoint_uv = None if self.keypoint_uv is None else np.array(self.keypoint_uv, copy=True)
+            keypoint_uv = (
+                None
+                if self.keypoint_uv is None
+                else np.array(self.keypoint_uv, copy=True)
+            )
             keypoint_px_header = self.keypoint_px_header
 
         return {
@@ -352,7 +361,7 @@ class TrackingOverlayViewerNode(Node):
                     lines.append(current)
                     current = ""
                 for start in range(0, len(word), max_chars):
-                    lines.append(word[start : start + max_chars])
+                    lines.append(word[start:start + max_chars])
                 continue
             candidate = word if not current else f"{current} {word}"
             if len(candidate) <= max_chars:
@@ -459,7 +468,11 @@ class TrackingOverlayViewerNode(Node):
         scaled = self._scaled_frame(frame)
         scale_x = scaled.shape[1] / max(width, 1)
         scale_y = scaled.shape[0] / max(height, 1)
-        if target_valid and keypoint_uv is not None and self._keypoint_is_fresh(keypoint_px_header):
+        if (
+            target_valid
+            and keypoint_uv is not None
+            and self._keypoint_is_fresh(keypoint_px_header)
+        ):
             u = int(round(float(keypoint_uv[0]) * scale_x))
             v = int(round(float(keypoint_uv[1]) * scale_y))
             if 0 <= u < scaled.shape[1] and 0 <= v < scaled.shape[0]:
@@ -719,12 +732,17 @@ class TrackingOverlayViewerNode(Node):
             f"points = {points_xyz.shape[0]}",
             f"prompt = {status['prompt']}",
             f"center = ({center[0, 0]:.3f}, {center[0, 1]:.3f}, {center[0, 2]:.3f}) m",
-            f"extent = ({extent_xyz[0] * 100:.1f}, {extent_xyz[1] * 100:.1f}, {extent_xyz[2] * 100:.1f}) cm",
+            (
+                f"extent = ({extent_xyz[0] * 100:.1f}, "
+                f"{extent_xyz[1] * 100:.1f}, {extent_xyz[2] * 100:.1f}) cm"
+            ),
             f"z range = {min_xyz[2]:.3f} .. {max_xyz[2]:.3f} m",
         ]
         if keypoint_xyz is not None and np.all(np.isfinite(keypoint_xyz)):
             lines.append(
-                f"keypoint = ({float(keypoint_xyz[0]):.3f}, {float(keypoint_xyz[1]):.3f}, {float(keypoint_xyz[2]):.3f}) m"
+                f"keypoint = ({float(keypoint_xyz[0]):.3f}, "
+                f"{float(keypoint_xyz[1]):.3f}, "
+                f"{float(keypoint_xyz[2]):.3f}) m"
             )
         else:
             lines.append("keypoint = waiting")
@@ -869,11 +887,19 @@ class TrackingOverlayViewerNode(Node):
                 if self.latest_points_xyz is None
                 else np.array(self.latest_points_xyz, copy=True)
             )
-            depth_m = None if self.latest_depth_m is None else np.array(self.latest_depth_m, copy=True)
+            depth_m = (
+                None
+                if self.latest_depth_m is None
+                else np.array(self.latest_depth_m, copy=True)
+            )
             intrinsics = self.camera_intrinsics
             points_header = self.latest_points_header
             depth_header = self.latest_depth_header
-            keypoint_xyz = None if self.keypoint_xyz is None else np.array(self.keypoint_xyz, copy=True)
+            keypoint_xyz = (
+                None
+                if self.keypoint_xyz is None
+                else np.array(self.keypoint_xyz, copy=True)
+            )
             if self.prefer_overlay_image and self.latest_overlay_bgr is not None:
                 keypoint_frame = self.latest_overlay_bgr.copy()
             elif color_bgr is not None:

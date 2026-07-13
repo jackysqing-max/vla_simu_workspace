@@ -1,13 +1,8 @@
-import os
 from glob import glob
-from pathlib import Path
 
 from setuptools import find_packages, setup
 
 package_name = "touchless_project"
-package_root = Path(__file__).resolve().parent
-legacy_root = package_root.parent / "touchless_project"
-legacy_volume = legacy_root / "t1_150116AR_20150115.nii"
 
 data_files = [
     (
@@ -17,14 +12,6 @@ data_files = [
     ("share/" + package_name, ["package.xml"]),
     ("share/" + package_name + "/launch", glob("launch/*.launch.py")),
 ]
-
-if legacy_volume.exists():
-    data_files.append(
-        (
-            "share/" + package_name + "/data",
-            [os.path.relpath(legacy_volume, package_root)],
-        ),
-    )
 
 setup(
     name=package_name,

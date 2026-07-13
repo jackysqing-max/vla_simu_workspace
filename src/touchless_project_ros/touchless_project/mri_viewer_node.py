@@ -8,11 +8,9 @@ import os
 from pathlib import Path
 
 import rclpy
-from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
 from rclpy.node import Node
 from std_msgs.msg import String
 
-from touchless_project import DEFAULT_VOLUME_FILENAME, PACKAGE_NAME
 from touchless_project.dependencies import import_dependency
 from touchless_project.gesture_core import make_config
 
@@ -51,34 +49,20 @@ class TouchlessMriViewerNode(Node):
         )
 
     def _resolve_nifti_path(self, configured_path: str) -> Path:
-        if configured_path:
-            candidate = Path(configured_path).expanduser().resolve()
-            if candidate.exists():
-                return candidate
+        raw_path = configured_path or os.environ.get(
+            "TOUCHLESS_PROJECT_NIFTI_PATH",
+            "",
+        ).strip()
+        if not raw_path:
+            raise FileNotFoundError(
+                "No MRI volume configured. Set the 'nifti_path' parameter or "
+                "TOUCHLESS_PROJECT_NIFTI_PATH."
+            )
+
+        candidate = Path(raw_path).expanduser().resolve()
+        if not candidate.is_file():
             raise FileNotFoundError(f"NIfTI file not found: {candidate}")
-
-        for candidate in self._default_nifti_candidates():
-            if candidate.exists():
-                return candidate.resolve()
-
-        raise FileNotFoundError(
-            "Unable to locate the default MRI volume. Set the 'nifti_path' parameter."
-        )
-
-    def _default_nifti_candidates(self):
-        env_path = os.environ.get("TOUCHLESS_PROJECT_NIFTI_PATH", "").strip()
-        if env_path:
-            yield Path(env_path).expanduser()
-
-        try:
-            share_dir = Path(get_package_share_directory(PACKAGE_NAME))
-            yield share_dir / "data" / DEFAULT_VOLUME_FILENAME
-        except PackageNotFoundError:
-            pass
-
-        source_workspace_root = Path(__file__).resolve().parents[2]
-        yield source_workspace_root.parent / "touchless_project" / DEFAULT_VOLUME_FILENAME
-        yield Path.cwd() / DEFAULT_VOLUME_FILENAME
+        return candidate
 
     def _load_volume(self) -> None:
         image = self.nibabel.load(str(self.nifti_path))
