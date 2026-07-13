@@ -9,6 +9,12 @@ import re
 SUPPORTED_ACTIONS = ("hover_target", "wait", "grasp_target", "release_gripper")
 DEFAULT_ACTIONS = ("hover_target", "wait")
 GRASP_ACTIONS = ("grasp_target", "release_gripper")
+SURGICAL_RCM_ACTIONS = (
+    "localize_rcm_port",
+    "align_tool_axis",
+    "establish_rcm",
+    "execute_rcm_circle",
+)
 SUPPORTED_TARGET_PROMPTS = (
     "red cube",
     "green cube",
@@ -46,6 +52,34 @@ PLAN_JSON_SCHEMA = {
                     "success_radius_m",
                     "dwell_sec",
                     "wait_sec",
+                ],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["task_summary", "planning_notes", "steps"],
+    "additionalProperties": False,
+}
+
+SURGICAL_RCM_PLAN_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "task_summary": {"type": "string"},
+        "planning_notes": {"type": "string"},
+        "steps": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "step_index": {"type": "integer"},
+                    "action": {
+                        "type": "string",
+                        "enum": list(SURGICAL_RCM_ACTIONS),
+                    },
+                },
+                "required": [
+                    "step_index",
+                    "action",
                 ],
                 "additionalProperties": False,
             },
@@ -312,16 +346,90 @@ def _positive_float(value, default: float) -> float:
     return value
 
 
+def _canonicalize_surgical_rcm_steps(steps: list[dict]) -> list[dict]:
+    if not steps:
+        return []
+
+    defaults = {
+        "localize_rcm_port": {
+            "description": "Locate and lock the circular port center and insertion axis.",
+            "success_radius_m": 0.006,
+            "dwell_sec": 0.5,
+            "insertion_depth_m": 0.0,
+            "trajectory_radius_m": 0.0,
+            "trajectory_cycles": 0.0,
+        },
+        "align_tool_axis": {
+            "description": "Align the surgical tool axis with the locked insertion axis.",
+            "success_radius_m": 0.006,
+            "dwell_sec": 0.5,
+            "insertion_depth_m": 0.0,
+            "trajectory_radius_m": 0.0,
+            "trajectory_cycles": 0.0,
+        },
+        "establish_rcm": {
+            "description": (
+                "Insert through the port and establish the port center as "
+                "the fixed RCM point."
+            ),
+            "success_radius_m": 0.006,
+            "dwell_sec": 0.8,
+            "insertion_depth_m": 0.077,
+            "trajectory_radius_m": 0.0,
+            "trajectory_cycles": 0.0,
+        },
+        "execute_rcm_circle": {
+            "description": (
+                "Follow a circular tool-tip trajectory while keeping the "
+                "RCM point fixed."
+            ),
+            "success_radius_m": 0.006,
+            "dwell_sec": 0.0,
+            "insertion_depth_m": 0.077,
+            "trajectory_radius_m": 0.020,
+            "trajectory_cycles": 1.0,
+        },
+    }
+
+    canonical = []
+    for index, action in enumerate(SURGICAL_RCM_ACTIONS, start=1):
+        default = defaults[action]
+        canonical.append(
+            {
+                "step_index": index,
+                "action": action,
+                "target_prompt": (
+                    "circular hole"
+                    if action != "execute_rcm_circle"
+                    else ""
+                ),
+                "description": default["description"],
+                "success_radius_m": default["success_radius_m"],
+                "dwell_sec": default["dwell_sec"],
+                "wait_sec": 0.0,
+                "insertion_depth_m": default["insertion_depth_m"],
+                "trajectory_radius_m": default["trajectory_radius_m"],
+                "trajectory_cycles": default["trajectory_cycles"],
+            }
+        )
+    return canonical
+
+
 def sanitize_plan(
     raw_plan: dict,
     *,
     allow_open_vocabulary: bool = False,
     allow_grasp_actions: bool = False,
+    allow_rcm_actions: bool = False,
 ) -> dict:
     """Normalize model output into a predictable execution plan."""
     plan = raw_plan if isinstance(raw_plan, dict) else {}
-    allowed_actions = set(DEFAULT_ACTIONS)
-    if allow_grasp_actions:
+    allowed_actions = (
+        set(SURGICAL_RCM_ACTIONS)
+        if allow_rcm_actions
+        else set(DEFAULT_ACTIONS)
+    )
+    if allow_grasp_actions and not allow_rcm_actions:
         allowed_actions.update(GRASP_ACTIONS)
 
     steps = []
@@ -331,7 +439,11 @@ def sanitize_plan(
 
         action = str(raw_step.get("action", "hover_target")).strip().lower()
         if action not in allowed_actions:
-            action = "hover_target"
+            action = (
+                "localize_rcm_port"
+                if allow_rcm_actions
+                else "hover_target"
+            )
 
         description = str(raw_step.get("description", "")).strip()
         step_index = raw_step.get("step_index", fallback_index)
@@ -344,13 +456,20 @@ def sanitize_plan(
 
         target_prompt = normalize_target_prompt(
             str(raw_step.get("target_prompt", "")),
-            allow_open_vocabulary=allow_open_vocabulary,
+            allow_open_vocabulary=(
+                allow_open_vocabulary or allow_rcm_actions
+            ),
         )
         success_radius_m = _positive_float(raw_step.get("success_radius_m", 0.0), 0.0)
         dwell_sec = _positive_float(raw_step.get("dwell_sec", 1.0), 1.0)
         wait_sec = _positive_float(raw_step.get("wait_sec", 1.0), 1.0)
 
-        if action == "wait":
+        if action in SURGICAL_RCM_ACTIONS:
+            if action == "execute_rcm_circle":
+                target_prompt = ""
+            elif not target_prompt:
+                target_prompt = "circular hole"
+        elif action == "wait":
             target_prompt = ""
             success_radius_m = 0.0
             dwell_sec = 0.0
@@ -375,21 +494,40 @@ def sanitize_plan(
             # Drop malformed target steps instead of sending the robot to nowhere.
             continue
 
-        steps.append(
-            {
-                "step_index": step_index,
-                "action": action,
-                "target_prompt": target_prompt,
-                "description": description or f"{action} {target_prompt}".strip(),
-                "success_radius_m": success_radius_m,
-                "dwell_sec": dwell_sec,
-                "wait_sec": wait_sec,
-            }
-        )
+        sanitized_step = {
+            "step_index": step_index,
+            "action": action,
+            "target_prompt": target_prompt,
+            "description": description or f"{action} {target_prompt}".strip(),
+            "success_radius_m": success_radius_m,
+            "dwell_sec": dwell_sec,
+            "wait_sec": wait_sec,
+        }
+        if allow_rcm_actions:
+            sanitized_step.update(
+                {
+                    "insertion_depth_m": _positive_float(
+                        raw_step.get("insertion_depth_m", 0.0),
+                        0.0,
+                    ),
+                    "trajectory_radius_m": _positive_float(
+                        raw_step.get("trajectory_radius_m", 0.0),
+                        0.0,
+                    ),
+                    "trajectory_cycles": _positive_float(
+                        raw_step.get("trajectory_cycles", 0.0),
+                        0.0,
+                    ),
+                }
+            )
+        steps.append(sanitized_step)
 
     steps.sort(key=lambda item: item["step_index"])
-    steps = _repair_release_destination_order(steps)
-    if allow_open_vocabulary and allow_grasp_actions:
+    if allow_rcm_actions:
+        steps = _canonicalize_surgical_rcm_steps(steps)
+    else:
+        steps = _repair_release_destination_order(steps)
+    if allow_open_vocabulary and allow_grasp_actions and not allow_rcm_actions:
         steps = _insert_default_medical_release_destination(steps)
     return {
         "task_summary": str(plan.get("task_summary", "LLM task")).strip() or "LLM task",
@@ -619,16 +757,105 @@ def _infer_open_vocabulary_plan_from_instruction(
     )
 
 
+def _infer_surgical_rcm_plan_from_instruction(
+    instruction_text: str,
+) -> dict:
+    text = (instruction_text or "").strip()
+    if not text:
+        return {
+            "task_summary": "RCM constrained port task",
+            "planning_notes": "The instruction was empty.",
+            "steps": [],
+        }
+    return sanitize_plan(
+        {
+            "task_summary": text,
+            "planning_notes": (
+                "Generated locally as a safety-ordered RCM port sequence. "
+                "Perception locks the port pose before any robot motion."
+            ),
+            "steps": [
+                {
+                    "step_index": 1,
+                    "action": "localize_rcm_port",
+                    "target_prompt": "circular hole",
+                    "description": (
+                        "Locate and lock the circular port center and "
+                        "insertion axis."
+                    ),
+                    "success_radius_m": 0.006,
+                    "dwell_sec": 0.5,
+                    "wait_sec": 0.0,
+                    "insertion_depth_m": 0.0,
+                    "trajectory_radius_m": 0.0,
+                    "trajectory_cycles": 0.0,
+                },
+                {
+                    "step_index": 2,
+                    "action": "align_tool_axis",
+                    "target_prompt": "circular hole",
+                    "description": (
+                        "Align the surgical tool with the locked insertion "
+                        "axis at the pre-insertion pose."
+                    ),
+                    "success_radius_m": 0.006,
+                    "dwell_sec": 0.5,
+                    "wait_sec": 0.0,
+                    "insertion_depth_m": 0.0,
+                    "trajectory_radius_m": 0.0,
+                    "trajectory_cycles": 0.0,
+                },
+                {
+                    "step_index": 3,
+                    "action": "establish_rcm",
+                    "target_prompt": "circular hole",
+                    "description": (
+                        "Insert along the locked axis and establish the port "
+                        "center as the fixed RCM point."
+                    ),
+                    "success_radius_m": 0.006,
+                    "dwell_sec": 0.8,
+                    "wait_sec": 0.0,
+                    "insertion_depth_m": 0.077,
+                    "trajectory_radius_m": 0.0,
+                    "trajectory_cycles": 0.0,
+                },
+                {
+                    "step_index": 4,
+                    "action": "execute_rcm_circle",
+                    "target_prompt": "",
+                    "description": (
+                        "Track a circular tool-tip trajectory while keeping "
+                        "the RCM point fixed."
+                    ),
+                    "success_radius_m": 0.006,
+                    "dwell_sec": 0.0,
+                    "wait_sec": 0.0,
+                    "insertion_depth_m": 0.077,
+                    "trajectory_radius_m": 0.020,
+                    "trajectory_cycles": 1.0,
+                },
+            ],
+        },
+        allow_open_vocabulary=True,
+        allow_rcm_actions=True,
+    )
+
+
 def infer_plan_from_instruction(
     instruction_text: str,
     *,
     allow_open_vocabulary: bool = False,
     allow_grasp_actions: bool = False,
+    allow_rcm_actions: bool = False,
 ) -> dict:
-    """Build a deterministic hover-only plan from color mentions in the instruction.
-
-    This fallback keeps the demo usable even if the remote planner is unavailable.
     """
+    Build a deterministic plan from a natural-language instruction.
+
+    This fallback keeps the demo usable when the remote planner is unavailable.
+    """
+    if allow_rcm_actions:
+        return _infer_surgical_rcm_plan_from_instruction(instruction_text)
     if allow_open_vocabulary:
         return _infer_open_vocabulary_plan_from_instruction(
             instruction_text,
@@ -685,11 +912,13 @@ def plan_from_json(
     *,
     allow_open_vocabulary: bool = False,
     allow_grasp_actions: bool = False,
+    allow_rcm_actions: bool = False,
 ) -> dict:
     return sanitize_plan(
         json.loads(text),
         allow_open_vocabulary=allow_open_vocabulary,
         allow_grasp_actions=allow_grasp_actions,
+        allow_rcm_actions=allow_rcm_actions,
     )
 
 

@@ -1,0 +1,201 @@
+KUKA RCM 腔镜手术 Phantom 三维建模规范
+========================================
+
+单位说明
+--------
+CAD 建模单位：mm
+PyBullet / URDF 单位：m
+
+
+1. CAD 坐标系
+-------------
+局部原点位于 phantom 底面中心。
+
+X 轴：phantom 长度方向
+Y 轴：phantom 宽度方向
+Z 轴：竖直向上
+
+
+2. Phantom 外壳尺寸
+-------------------
+外部长度 X：320 mm
+外部宽度 Y：260 mm
+外部高度 Z：180 mm
+
+侧壁厚度：4 mm
+顶板厚度：4 mm
+底板厚度：6 mm
+
+内部净空间约：
+290 x 230 x 160 mm
+
+
+3. RCM 穿刺端口
+---------------
+端口中心相对 CAD 局部原点：
+
+X = -48.3 mm
+Y =   0.0 mm
+Z = 179.7 mm
+
+端口轴线：
+绕局部 Y 轴旋转 -19.57 度。
+
+等效单位方向向量：
+
+腔内方向：
+(0.335, 0.000, -0.942)
+
+从腔内指向机器人方向：
+(-0.335, 0.000, 0.942)
+
+端口尺寸：
+
+顶板刚性开孔直径：34 mm
+球形万向端口直径：40 mm
+器械中心通孔直径：15 mm
+外部固定法兰直径：60 mm
+外部固定法兰厚度：6 mm
+器械允许摆角：至少正负 30 度
+
+球形万向端口的球心必须与 RCM 端口中心重合。
+
+
+4. 当前器械尺寸
+---------------
+器械总长度：220 mm
+杆体直径：12 mm
+末端安装套筒直径：28 mm
+末端安装套筒长度：30 mm
+
+机械臂法兰到 RCM：143 mm
+RCM 到器械尖端：77 mm
+
+
+5. 内部操作平台
+---------------
+操作平台尺寸：
+280 x 200 x 4 mm
+
+操作平台顶面高度：
+局部 Z = 100 mm
+
+建议将平台设计成可拆卸或高度可调结构。
+推荐端口下方距离档位：
+
+70 mm
+90 mm
+110 mm
+
+
+6. 当前器械尖端工作包络
+-----------------------
+以下为 PyBullet 世界坐标，单位为 mm：
+
+X = 727.5 至 760.4
+Y = -20.0 至 20.0
+Z = 332.2 至 354.9
+
+端口下方建议至少保留以下无碰撞空间：
+
+X 方向：正负 70 mm
+Y 方向：正负 70 mm
+深度方向：100 mm
+
+
+7. PyBullet 世界坐标安装位置
+----------------------------
+Phantom CAD 局部原点在 PyBullet 中的位置：
+
+basePosition = [0.750, 0.000, 0.225]
+baseOrientation = [0.000, 0.000, 0.000, 1.000]
+
+对应 RCM 端口世界坐标：
+
+[0.7017, 0.0000, 0.4047] m
+
+加载时使用固定基座：
+
+useFixedBase = True
+
+
+8. 推荐文件结构
+---------------
+phantom.urdf
+meshes/phantom_visual.obj
+meshes/phantom_visual.mtl
+meshes/phantom_collision.stl
+
+也可以将碰撞模型拆分为：
+
+meshes/phantom_floor_collision.stl
+meshes/phantom_left_wall_collision.stl
+meshes/phantom_right_wall_collision.stl
+meshes/phantom_front_wall_collision.stl
+meshes/phantom_back_wall_collision.stl
+meshes/phantom_top_collision.stl
+meshes/phantom_port_collision.stl
+
+
+9. 网格导出要求
+---------------
+1. 推荐使用 OBJ 作为高精度 visual 模型。
+2. 推荐使用简化 STL 作为 collision 模型。
+3. 所有网格必须三角化。
+4. 网格应封闭、无自交、无重复面。
+5. 法线方向必须一致。
+6. 删除隐藏零件和不需要的内部面。
+7. 碰撞模型建议低于 10000 个三角面。
+8. 碰撞模型优先拆分为多个凸零件。
+9. 文件名不要使用空格或中文。
+10. CAD 原点必须保持在 phantom 底面中心。
+
+
+10. 单位缩放
+------------
+STL 和 OBJ 通常不记录真实单位。
+
+如果 CAD 按 mm 导出，在 URDF 中必须使用：
+
+scale="0.001 0.001 0.001"
+
+如果模型已经按 m 导出，则使用：
+
+scale="1 1 1"
+
+
+11. URDF 网格示例
+-----------------
+<visual>
+  <geometry>
+    <mesh filename="meshes/phantom_visual.obj"
+          scale="0.001 0.001 0.001"/>
+  </geometry>
+</visual>
+
+<collision>
+  <geometry>
+    <mesh filename="meshes/phantom_collision.stl"
+          scale="0.001 0.001 0.001"/>
+  </geometry>
+</collision>
+
+
+12. PyBullet 加载示例
+---------------------
+phantom_id = p.loadURDF(
+    "phantom.urdf",
+    basePosition=[0.750, 0.000, 0.225],
+    baseOrientation=[0.000, 0.000, 0.000, 1.000],
+    useFixedBase=True,
+)
+
+
+13. 碰撞建模注意事项
+--------------------
+不要将整个封闭外壳直接简化成一个凸包，否则 PyBullet 会把内部空腔
+填满，器械无法进入。
+
+建议将底板、各侧壁、顶板和端口分别作为独立碰撞零件，或者仅对
+固定模型使用经过验证的凹三角网格碰撞。
+

@@ -1,9 +1,11 @@
 pybullet build time: Jan 29 2025 23:16:28
-[INFO] [1769462567.220135069] [iiwa_circle_ik_desired]: Iiwa circle IK desired node started.
-[INFO] [1769462567.220349722] [iiwa_circle_ik_desired]: [PARAM] publish_hz=200.0, motion_hz=0.1, radius=0.1, phase_rad=0.0
-[INFO] [1769462567.220463066] [iiwa_circle_ik_desired]: Waiting for /iiwa7/init_done and stable /iiwa7/joint_states to lock initial pose...
+[INFO] [1781699149.784617597] [iiwa_circle_ik_desired_recording]: Iiwa circle IK recording node started. radius=0.035m speed=0.020m/s period=11.00s plane=xy velocity_lock=False
+[WARN] [1781699152.571145517] [iiwa_circle_ik_desired_recording]: [INIT] /iiwa7/init_done not observed; locking current joint state after 2.8s for recording.
+[INFO] [1781699152.571635299] [iiwa_circle_ik_desired_recording]: [INIT] locked q0=['-0.000', '0.578', '-0.000', '-1.156', '-0.000', '0.963', '0.000']
+[INFO] [1781699152.571747698] [iiwa_circle_ik_desired_recording]: [INIT] circular Cartesian center=(0.659,-0.000,0.574)
+[INFO] [1781699152.894223354] [iiwa_circle_ik_desired_recording]: [INIT] received /iiwa7/init_done=True
 Traceback (most recent call last):
-  File "/home/siqin/ros2_workspaces/humble/ros2_pybullet_ws/build/pybullet_ros2_sim/pybullet_ros2_sim/iiwa_circle_ik_desired.py", line 208, in main
+  File "/home/siqin/ros2_workspaces/humble/ros2_pybullet_ws/docs/recording_scripts/iiwa_circle_ik_desired_recording.py", line 209, in main
     rclpy.spin(node)
   File "/opt/ros/humble/local/lib/python3.10/dist-packages/rclpy/__init__.py", line 229, in spin
     executor.spin_once()
@@ -13,16 +15,16 @@ Traceback (most recent call last):
     handler, entity, node = self.wait_for_ready_callbacks(timeout_sec=timeout_sec)
   File "/opt/ros/humble/local/lib/python3.10/dist-packages/rclpy/executors.py", line 745, in wait_for_ready_callbacks
     return next(self._cb_iter)
-  File "/opt/ros/humble/local/lib/python3.10/dist-packages/rclpy/executors.py", line 618, in _wait_for_ready_callbacks
-    wait_set = _rclpy.WaitSet(
-rclpy._rclpy_pybind11.RCLError: failed to initialize wait set: the given context is not valid, either rcl_init() was not called or rcl_shutdown() was called., at ./src/rcl/wait.c:130
+  File "/opt/ros/humble/local/lib/python3.10/dist-packages/rclpy/executors.py", line 646, in _wait_for_ready_callbacks
+    raise ExternalShutdownException()
+rclpy.executors.ExternalShutdownException
 
 During handling of the above exception, another exception occurred:
 
 Traceback (most recent call last):
-  File "/home/siqin/ros2_workspaces/humble/ros2_pybullet_ws/install/pybullet_ros2_sim/lib/pybullet_ros2_sim/iiwa_circle_ik_desired", line 33, in <module>
-    sys.exit(load_entry_point('pybullet-ros2-sim', 'console_scripts', 'iiwa_circle_ik_desired')())
-  File "/home/siqin/ros2_workspaces/humble/ros2_pybullet_ws/build/pybullet_ros2_sim/pybullet_ros2_sim/iiwa_circle_ik_desired.py", line 213, in main
+  File "/home/siqin/ros2_workspaces/humble/ros2_pybullet_ws/docs/recording_scripts/iiwa_circle_ik_desired_recording.py", line 218, in <module>
+    main()
+  File "/home/siqin/ros2_workspaces/humble/ros2_pybullet_ws/docs/recording_scripts/iiwa_circle_ik_desired_recording.py", line 214, in main
     rclpy.shutdown()
   File "/opt/ros/humble/local/lib/python3.10/dist-packages/rclpy/__init__.py", line 130, in shutdown
     _shutdown(context=context)

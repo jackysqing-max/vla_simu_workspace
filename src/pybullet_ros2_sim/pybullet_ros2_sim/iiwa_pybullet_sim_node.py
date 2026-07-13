@@ -1,18 +1,31 @@
 #!/usr/bin/env python3
 """Core iiwa execution node backed by a single PyBullet simulation."""
 
+import math
 import threading
+from pathlib import Path
 from typing import List, Tuple
 
 import pybullet as p
 import pybullet_data
 import rclpy
-from rclpy.callback_groups import ReentrantCallbackGroup
-from rclpy.executors import MultiThreadedExecutor
+from geometry_msgs.msg import PointStamped, TransformStamped, Vector3Stamped
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
+from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
-from sensor_msgs.msg import JointState
-from std_msgs.msg import Bool, Float64MultiArray, Int8
+from sensor_msgs.msg import CameraInfo, Image, JointState
+from std_msgs.msg import Bool, Float64MultiArray, Header, Int8
+from tf2_ros import TransformBroadcaster
+
+from pybullet_ros2_sim.camera_tf_utils import view_matrix_to_world_optical_tf
+from pybullet_ros2_sim.depth_utils import depth_buffer_to_meters
+from pybullet_ros2_sim.ros_msg_utils import (
+    depth32f_to_imgmsg,
+    make_camera_info,
+    rgb_to_imgmsg,
+)
+from pybullet_ros2_sim.sim_camera import SimCameraConfig, SimRGBDCamera
 
 
 def min_jerk_s(u: float) -> float:
@@ -53,7 +66,9 @@ class IiwaPybulletSim(Node):
 
         self._lock = threading.Lock()
         self.cb_sub = ReentrantCallbackGroup()
-        self.cb_timer = ReentrantCallbackGroup()
+        # PyBullet is not thread-safe. Serializing both timers prevents slow GUI
+        # frames from allowing overlapping physics steps.
+        self.cb_timer = MutuallyExclusiveCallbackGroup()
 
         self._declare_parameters()
         self._load_parameters()
@@ -66,8 +81,46 @@ class IiwaPybulletSim(Node):
         self.have_tau = False
         self._warned_no_tau = False
         self._init_done_sent = False
+        self.latest_rcm_point = None
+        self.latest_rcm_point_time = 0.0
+        self.latest_tip_point = None
+        self.latest_tip_point_time = 0.0
+        self.latest_port_point = None
+        self.latest_port_axis = None
+        self.latest_port_pose_time = 0.0
 
         self.pub_js = self.create_publisher(JointState, "/iiwa7/joint_states", 10)
+        self.camera = None
+        self.tf_broadcaster = None
+        self.last_rgbd_time = float("-inf")
+        self.rgbd_runtime_enabled = self.enable_rgbd_camera
+        if self.enable_rgbd_camera:
+            qos_img = QoSProfile(depth=1)
+            qos_img.reliability = ReliabilityPolicy.BEST_EFFORT
+            qos_img.durability = DurabilityPolicy.VOLATILE
+            self.pub_color = self.create_publisher(
+                Image,
+                self.rgbd_color_topic,
+                qos_img,
+            )
+            self.pub_depth = self.create_publisher(
+                Image,
+                self.rgbd_depth_topic,
+                qos_img,
+            )
+            self.pub_camera_info = self.create_publisher(
+                CameraInfo,
+                self.rgbd_camera_info_topic,
+                qos_img,
+            )
+            self.tf_broadcaster = TransformBroadcaster(self)
+            self.sub_rgbd_enable = self.create_subscription(
+                Bool,
+                self.rgbd_enable_topic,
+                self.on_rgbd_enable,
+                10,
+                callback_group=self.cb_sub,
+            )
 
         qos_latch = QoSProfile(
             depth=1,
@@ -104,6 +157,36 @@ class IiwaPybulletSim(Node):
             10,
             callback_group=self.cb_sub,
         )
+        if self.show_rcm_debug_markers:
+            self.sub_rcm_point = self.create_subscription(
+                PointStamped,
+                self.rcm_point_topic,
+                self.on_rcm_point,
+                10,
+                callback_group=self.cb_sub,
+            )
+            self.sub_tip_point = self.create_subscription(
+                PointStamped,
+                self.rcm_tip_point_topic,
+                self.on_rcm_tip_point,
+                10,
+                callback_group=self.cb_sub,
+            )
+        if self.show_port_detection_overlay:
+            self.sub_port_point = self.create_subscription(
+                PointStamped,
+                self.locked_port_point_topic,
+                self.on_locked_port_point,
+                10,
+                callback_group=self.cb_sub,
+            )
+            self.sub_port_axis = self.create_subscription(
+                Vector3Stamped,
+                self.locked_port_axis_topic,
+                self.on_locked_port_axis,
+                10,
+                callback_group=self.cb_sub,
+            )
 
         self.client = p.connect(p.GUI if self.gui else p.DIRECT)
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
@@ -120,7 +203,11 @@ class IiwaPybulletSim(Node):
         p.loadURDF("plane.urdf", physicsClientId=self.client)
         self.table_id = p.loadURDF(
             "table/table.urdf",
-            basePosition=[0.6, 0.0, -0.62],
+            basePosition=[
+                self.table_x_m,
+                self.table_y_m,
+                self.table_top_z_m - 0.625,
+            ],
             useFixedBase=True,
             physicsClientId=self.client,
         )
@@ -129,6 +216,20 @@ class IiwaPybulletSim(Node):
             useFixedBase=True,
             physicsClientId=self.client,
         )
+        if self.reset_to_init_on_start:
+            for array_index, joint_index in enumerate(self.joint_indices):
+                p.resetJointState(
+                    self.robot_id,
+                    joint_index,
+                    self.init_q[array_index],
+                    targetVelocity=0.0,
+                    physicsClientId=self.client,
+                )
+        self._setup_rcm_phantom()
+        self._configure_gui_view()
+        self._setup_rcm_debug_overlay()
+        if self.enable_rgbd_camera:
+            self.camera = SimRGBDCamera(self.client, self.rgbd_camera_config)
 
         self.q_start = [
             float(
@@ -143,10 +244,9 @@ class IiwaPybulletSim(Node):
 
         self.phase = "GOTO" if self.use_goto else "RUN"
         self.t_goto_start = self.get_clock().now().nanoseconds * 1e-9
+        self.goto_settle_count = 0
 
-        # Default to torque mode so the impedance controller chain becomes the
-        # primary runtime path. Position mode is still available for debugging.
-        self.control_mode = self.MODE_TORQUE
+        self.control_mode = self.initial_control_mode
         self._apply_mode_change(None, self.control_mode)
 
         self.timer = self.create_timer(self.dt, self.step, callback_group=self.cb_timer)
@@ -155,16 +255,57 @@ class IiwaPybulletSim(Node):
             self.debug_status,
             callback_group=self.cb_timer,
         )
-
         self.get_logger().info("Iiwa PyBullet sim node started.")
         self.get_logger().info(
             "Control mode topic: /iiwa7/control_mode (0=FREE, 1=POSITION, 2=TORQUE)"
+        )
+        if self.show_rcm_debug_markers:
+            self.get_logger().info(
+                "[RCM_OVERLAY] enabled: red=RCM point, yellow=desired tip, "
+                "green=actual tool-tip trace"
+            )
+        if self.show_port_detection_overlay:
+            self.get_logger().info(
+                "[PORT_OVERLAY] enabled: cyan ring=locked port center, "
+                "cyan arrow=locked inward port axis"
+            )
+        if self.enable_rgbd_camera:
+            self.get_logger().info(
+                "[RGBD] enabled: "
+                f"{self.rgbd_width}x{self.rgbd_height} @ {self.rgbd_hz:.1f} Hz, "
+                f"color={self.rgbd_color_topic}, depth={self.rgbd_depth_topic}"
+            )
+        if self.show_rcm_tool:
+            self.get_logger().info(
+                "[RCM_TOOL] enabled: "
+                f"length={self.rcm_tool_length_m:.3f} m, "
+                f"diameter={2.0 * self.rcm_tool_radius_m:.3f} m, "
+                "axis=link-7 +Z"
+            )
+        if self.dvrk_lnd_body_id is not None:
+            self.get_logger().info(
+                "[DVRK_LND] visual-only Large Needle Driver 420006 loaded: "
+                f"{self.dvrk_lnd_urdf_path}"
+            )
+        if self.rcm_phantom_body_id is not None:
+            self.get_logger().info(
+                "[RCM_PHANTOM] enabled: "
+                f"position=({self.rcm_phantom_x_m:.3f}, "
+                f"{self.rcm_phantom_y_m:.3f}, {self.rcm_phantom_z_m:.3f}) m, "
+                f"scale={self.rcm_phantom_scale:.4f}"
+            )
+        self.get_logger().info(
+            "[TABLE] "
+            f"center=({self.table_x_m:.3f}, {self.table_y_m:.3f}) m, "
+            f"top_z={self.table_top_z_m:.3f} m"
         )
 
     def _declare_parameters(self):
         self.declare_parameter("gui", True)
         self.declare_parameter("use_goto", True)
         self.declare_parameter("init_q", [0.0, 0.6, 0.0, -1.2, 0.0, 1.0, 0.0])
+        self.declare_parameter("initial_control_mode", self.MODE_TORQUE)
+        self.declare_parameter("reset_to_init_on_start", False)
 
         self.declare_parameter("goto_duration", 2.0)
         self.declare_parameter("goto_use_reset", False)
@@ -172,6 +313,9 @@ class IiwaPybulletSim(Node):
         self.declare_parameter("goto_pos_gain", 0.20)
         self.declare_parameter("goto_vel_gain", 1.00)
         self.declare_parameter("goto_max_vel", 1.0)
+        self.declare_parameter("goto_pos_tolerance_rad", 0.015)
+        self.declare_parameter("goto_vel_tolerance_rad_s", 0.05)
+        self.declare_parameter("goto_settle_cycles", 5)
 
         self.declare_parameter("track_force", 120.0)
         self.declare_parameter("track_pos_gain", 0.25)
@@ -180,10 +324,105 @@ class IiwaPybulletSim(Node):
 
         self.declare_parameter("sim_hz", 200.0)
         self.declare_parameter("tau_limit", 200.0)
+        self.declare_parameter("table_x_m", 0.6)
+        self.declare_parameter("table_y_m", 0.0)
+        self.declare_parameter("table_top_z_m", 0.005)
+        self.declare_parameter("clean_gui", False)
+        self.declare_parameter("camera_distance_m", 1.35)
+        self.declare_parameter("camera_yaw_deg", 42.0)
+        self.declare_parameter("camera_pitch_deg", -28.0)
+        self.declare_parameter("camera_target", [0.55, 0.0, 0.30])
+        self.declare_parameter("enable_rgbd_camera", False)
+        self.declare_parameter("rgbd_hz", 8.0)
+        self.declare_parameter("rgbd_width", 640)
+        self.declare_parameter("rgbd_height", 480)
+        self.declare_parameter("rgbd_fov_y_deg", 58.0)
+        self.declare_parameter("rgbd_near_m", 0.02)
+        self.declare_parameter("rgbd_far_m", 2.0)
+        self.declare_parameter("rgbd_target", [0.701726, 0.0, 0.36])
+        self.declare_parameter("rgbd_distance_m", 0.55)
+        self.declare_parameter("rgbd_yaw_deg", 90.0)
+        self.declare_parameter("rgbd_pitch_deg", -65.0)
+        self.declare_parameter("rgbd_roll_deg", 0.0)
+        self.declare_parameter(
+            "rgbd_color_topic",
+            "/sim/camera/color/image_raw",
+        )
+        self.declare_parameter(
+            "rgbd_depth_topic",
+            "/sim/camera/aligned_depth_to_color/image_raw",
+        )
+        self.declare_parameter(
+            "rgbd_camera_info_topic",
+            "/sim/camera/color/camera_info",
+        )
+        self.declare_parameter(
+            "rgbd_optical_frame",
+            "sim_camera_color_optical_frame",
+        )
+        self.declare_parameter(
+            "rgbd_enable_topic",
+            "/sim/camera/enabled",
+        )
+        self.declare_parameter("show_rcm_debug_markers", True)
+        self.declare_parameter("rcm_point_topic", "/rcm_virtual_fixtures/rcm_point")
+        self.declare_parameter("rcm_tip_point_topic", "/rcm_virtual_fixtures/tip_point")
+        self.declare_parameter("rcm_marker_radius_m", 0.018)
+        self.declare_parameter("rcm_tip_marker_radius_m", 0.012)
+        self.declare_parameter("ee_trace_point_radius_m", 0.006)
+        self.declare_parameter("ee_trace_min_dist_m", 0.008)
+        self.declare_parameter("ee_trace_max_points", 260)
+        self.declare_parameter("rcm_trace_min_inserted_depth_m", 0.0)
+        self.declare_parameter("rcm_marker_max_age_sec", 2.0)
+        self.declare_parameter("show_port_detection_overlay", False)
+        self.declare_parameter(
+            "locked_port_point_topic",
+            "/rcm_virtual_fixtures/locked_port_point",
+        )
+        self.declare_parameter(
+            "locked_port_axis_topic",
+            "/rcm_virtual_fixtures/locked_port_axis",
+        )
+        self.declare_parameter("port_overlay_max_age_sec", 2.0)
+        self.declare_parameter("port_overlay_ring_radius_m", 0.010)
+        self.declare_parameter("port_overlay_axis_outside_m", 0.050)
+        self.declare_parameter("port_overlay_axis_inside_m", 0.090)
+        self.declare_parameter("show_rcm_tool", False)
+        self.declare_parameter("rcm_tool_length_m", 0.220)
+        self.declare_parameter("rcm_tool_radius_m", 0.006)
+        self.declare_parameter("rcm_tool_mount_radius_m", 0.014)
+        self.declare_parameter("rcm_tool_mount_length_m", 0.030)
+        self.declare_parameter("show_dvrk_lnd_gripper", False)
+        self.declare_parameter("dvrk_lnd_urdf_path", "")
+        self.declare_parameter("dvrk_lnd_jaw_angle_rad", 0.45)
+        self.declare_parameter("dvrk_lnd_tip_offset_m", 0.026)
+        self.declare_parameter("trace_rcm_tool_tip", True)
+        self.declare_parameter("show_rcm_phantom", False)
+        self.declare_parameter("rcm_phantom_mesh_path", "")
+        self.declare_parameter("rcm_phantom_scale", 0.001)
+        self.declare_parameter("rcm_phantom_x_m", 0.701726)
+        self.declare_parameter("rcm_phantom_y_m", 0.0)
+        self.declare_parameter("rcm_phantom_z_m", 0.240701)
+        self.declare_parameter("rcm_phantom_roll_deg", 0.0)
+        self.declare_parameter("rcm_phantom_pitch_deg", 0.0)
+        self.declare_parameter("rcm_phantom_yaw_deg", 0.0)
+        self.declare_parameter("rcm_phantom_alpha", 0.42)
+        self.declare_parameter("rcm_phantom_collision", True)
 
     def _load_parameters(self):
         self.gui = bool(self.get_parameter("gui").value)
         self.use_goto = bool(self.get_parameter("use_goto").value)
+        self.initial_control_mode = int(
+            self.get_parameter("initial_control_mode").value
+        )
+        if self.initial_control_mode not in self.MODE_NAMES:
+            self.get_logger().warning(
+                "initial_control_mode must be 0, 1, or 2; using TORQUE"
+            )
+            self.initial_control_mode = self.MODE_TORQUE
+        self.reset_to_init_on_start = bool(
+            self.get_parameter("reset_to_init_on_start").value
+        )
 
         init_q = [float(value) for value in self.get_parameter("init_q").value]
         if len(init_q) < self.n:
@@ -196,6 +435,18 @@ class IiwaPybulletSim(Node):
         self.goto_pos_gain = float(self.get_parameter("goto_pos_gain").value)
         self.goto_vel_gain = float(self.get_parameter("goto_vel_gain").value)
         self.goto_max_vel = float(self.get_parameter("goto_max_vel").value)
+        self.goto_pos_tolerance_rad = max(
+            float(self.get_parameter("goto_pos_tolerance_rad").value),
+            0.001,
+        )
+        self.goto_vel_tolerance_rad_s = max(
+            float(self.get_parameter("goto_vel_tolerance_rad_s").value),
+            0.001,
+        )
+        self.goto_settle_cycles = max(
+            int(self.get_parameter("goto_settle_cycles").value),
+            1,
+        )
 
         self.track_force = float(self.get_parameter("track_force").value)
         self.track_pos_gain = float(self.get_parameter("track_pos_gain").value)
@@ -205,6 +456,358 @@ class IiwaPybulletSim(Node):
         sim_hz = float(self.get_parameter("sim_hz").value)
         self.dt = 1.0 / max(sim_hz, 1e-6)
         self.tau_limit = float(self.get_parameter("tau_limit").value)
+        self.table_x_m = float(self.get_parameter("table_x_m").value)
+        self.table_y_m = float(self.get_parameter("table_y_m").value)
+        self.table_top_z_m = float(
+            self.get_parameter("table_top_z_m").value
+        )
+        self.clean_gui = bool(self.get_parameter("clean_gui").value)
+        self.camera_distance_m = max(
+            float(self.get_parameter("camera_distance_m").value),
+            0.1,
+        )
+        self.camera_yaw_deg = float(self.get_parameter("camera_yaw_deg").value)
+        self.camera_pitch_deg = float(self.get_parameter("camera_pitch_deg").value)
+        camera_target = [
+            float(value) for value in self.get_parameter("camera_target").value
+        ]
+        if len(camera_target) < 3:
+            camera_target += [0.0] * (3 - len(camera_target))
+        self.camera_target = camera_target[:3]
+        self.enable_rgbd_camera = bool(
+            self.get_parameter("enable_rgbd_camera").value
+        )
+        self.rgbd_hz = max(
+            float(self.get_parameter("rgbd_hz").value),
+            0.2,
+        )
+        self.rgbd_width = max(
+            int(self.get_parameter("rgbd_width").value),
+            64,
+        )
+        self.rgbd_height = max(
+            int(self.get_parameter("rgbd_height").value),
+            48,
+        )
+        self.rgbd_color_topic = str(
+            self.get_parameter("rgbd_color_topic").value
+        )
+        self.rgbd_depth_topic = str(
+            self.get_parameter("rgbd_depth_topic").value
+        )
+        self.rgbd_camera_info_topic = str(
+            self.get_parameter("rgbd_camera_info_topic").value
+        )
+        self.rgbd_optical_frame = str(
+            self.get_parameter("rgbd_optical_frame").value
+        )
+        self.rgbd_enable_topic = str(
+            self.get_parameter("rgbd_enable_topic").value
+        )
+        rgbd_target = [
+            float(value)
+            for value in self.get_parameter("rgbd_target").value
+        ]
+        if len(rgbd_target) < 3:
+            rgbd_target += [0.0] * (3 - len(rgbd_target))
+        self.rgbd_camera_config = SimCameraConfig(
+            width=self.rgbd_width,
+            height=self.rgbd_height,
+            fov_y_deg=float(self.get_parameter("rgbd_fov_y_deg").value),
+            near=float(self.get_parameter("rgbd_near_m").value),
+            far=float(self.get_parameter("rgbd_far_m").value),
+            target_pos=tuple(rgbd_target[:3]),
+            distance=float(self.get_parameter("rgbd_distance_m").value),
+            yaw_deg=float(self.get_parameter("rgbd_yaw_deg").value),
+            pitch_deg=float(self.get_parameter("rgbd_pitch_deg").value),
+            roll_deg=float(self.get_parameter("rgbd_roll_deg").value),
+        )
+        self.show_rcm_debug_markers = bool(
+            self.get_parameter("show_rcm_debug_markers").value
+        )
+        self.rcm_point_topic = str(self.get_parameter("rcm_point_topic").value)
+        self.rcm_tip_point_topic = str(self.get_parameter("rcm_tip_point_topic").value)
+        self.rcm_marker_radius_m = max(
+            float(self.get_parameter("rcm_marker_radius_m").value),
+            0.001,
+        )
+        self.rcm_tip_marker_radius_m = max(
+            float(self.get_parameter("rcm_tip_marker_radius_m").value),
+            0.001,
+        )
+        self.ee_trace_point_radius_m = max(
+            float(self.get_parameter("ee_trace_point_radius_m").value),
+            0.001,
+        )
+        self.ee_trace_min_dist_m = max(
+            float(self.get_parameter("ee_trace_min_dist_m").value),
+            0.001,
+        )
+        self.ee_trace_max_points = max(
+            int(self.get_parameter("ee_trace_max_points").value),
+            1,
+        )
+        self.rcm_trace_min_inserted_depth_m = max(
+            float(
+                self.get_parameter(
+                    "rcm_trace_min_inserted_depth_m"
+                ).value
+            ),
+            0.0,
+        )
+        self.rcm_marker_max_age_sec = max(
+            float(self.get_parameter("rcm_marker_max_age_sec").value),
+            0.0,
+        )
+        self.show_port_detection_overlay = bool(
+            self.get_parameter("show_port_detection_overlay").value
+        )
+        self.locked_port_point_topic = str(
+            self.get_parameter("locked_port_point_topic").value
+        )
+        self.locked_port_axis_topic = str(
+            self.get_parameter("locked_port_axis_topic").value
+        )
+        self.port_overlay_max_age_sec = max(
+            float(self.get_parameter("port_overlay_max_age_sec").value),
+            0.0,
+        )
+        self.port_overlay_ring_radius_m = max(
+            float(self.get_parameter("port_overlay_ring_radius_m").value),
+            0.002,
+        )
+        self.port_overlay_axis_outside_m = max(
+            float(self.get_parameter("port_overlay_axis_outside_m").value),
+            0.005,
+        )
+        self.port_overlay_axis_inside_m = max(
+            float(self.get_parameter("port_overlay_axis_inside_m").value),
+            0.005,
+        )
+        self.show_rcm_tool = bool(self.get_parameter("show_rcm_tool").value)
+        self.rcm_tool_length_m = max(
+            float(self.get_parameter("rcm_tool_length_m").value),
+            0.02,
+        )
+        self.rcm_tool_radius_m = max(
+            float(self.get_parameter("rcm_tool_radius_m").value),
+            0.001,
+        )
+        self.rcm_tool_mount_radius_m = max(
+            float(self.get_parameter("rcm_tool_mount_radius_m").value),
+            self.rcm_tool_radius_m,
+        )
+        self.rcm_tool_mount_length_m = min(
+            max(float(self.get_parameter("rcm_tool_mount_length_m").value), 0.005),
+            self.rcm_tool_length_m,
+        )
+        self.show_dvrk_lnd_gripper = bool(
+            self.get_parameter("show_dvrk_lnd_gripper").value
+        )
+        self.dvrk_lnd_urdf_path = str(
+            self.get_parameter("dvrk_lnd_urdf_path").value
+        ).strip()
+        self.dvrk_lnd_jaw_angle_rad = min(
+            max(float(self.get_parameter("dvrk_lnd_jaw_angle_rad").value), 0.0),
+            1.4,
+        )
+        self.dvrk_lnd_tip_offset_m = min(
+            max(float(self.get_parameter("dvrk_lnd_tip_offset_m").value), 0.005),
+            0.45 * self.rcm_tool_length_m,
+        )
+        self.trace_rcm_tool_tip = bool(
+            self.get_parameter("trace_rcm_tool_tip").value
+        )
+        self.show_rcm_phantom = bool(
+            self.get_parameter("show_rcm_phantom").value
+        )
+        self.rcm_phantom_mesh_path = str(
+            self.get_parameter("rcm_phantom_mesh_path").value
+        ).strip()
+        self.rcm_phantom_scale = max(
+            float(self.get_parameter("rcm_phantom_scale").value),
+            1e-6,
+        )
+        self.rcm_phantom_x_m = float(
+            self.get_parameter("rcm_phantom_x_m").value
+        )
+        self.rcm_phantom_y_m = float(
+            self.get_parameter("rcm_phantom_y_m").value
+        )
+        self.rcm_phantom_z_m = float(
+            self.get_parameter("rcm_phantom_z_m").value
+        )
+        self.rcm_phantom_roll_deg = float(
+            self.get_parameter("rcm_phantom_roll_deg").value
+        )
+        self.rcm_phantom_pitch_deg = float(
+            self.get_parameter("rcm_phantom_pitch_deg").value
+        )
+        self.rcm_phantom_yaw_deg = float(
+            self.get_parameter("rcm_phantom_yaw_deg").value
+        )
+        self.rcm_phantom_alpha = min(
+            max(float(self.get_parameter("rcm_phantom_alpha").value), 0.05),
+            1.0,
+        )
+        self.rcm_phantom_collision = bool(
+            self.get_parameter("rcm_phantom_collision").value
+        )
+
+    def _setup_rcm_phantom(self):
+        self.rcm_phantom_body_id = None
+        if not self.show_rcm_phantom:
+            return
+
+        mesh_path = Path(self.rcm_phantom_mesh_path).expanduser()
+        if not mesh_path.is_file():
+            self.get_logger().warning(
+                f"[RCM_PHANTOM] mesh not found: {mesh_path}"
+            )
+            return
+
+        scale = [self.rcm_phantom_scale] * 3
+        position = [
+            self.rcm_phantom_x_m,
+            self.rcm_phantom_y_m,
+            self.rcm_phantom_z_m,
+        ]
+        orientation = p.getQuaternionFromEuler(
+            [
+                self.rcm_phantom_roll_deg * 3.141592653589793 / 180.0,
+                self.rcm_phantom_pitch_deg * 3.141592653589793 / 180.0,
+                self.rcm_phantom_yaw_deg * 3.141592653589793 / 180.0,
+            ]
+        )
+
+        try:
+            visual_shape = p.createVisualShape(
+                p.GEOM_MESH,
+                fileName=str(mesh_path),
+                meshScale=scale,
+                rgbaColor=[0.66, 0.78, 0.84, self.rcm_phantom_alpha],
+                specularColor=[0.25, 0.25, 0.25],
+                physicsClientId=self.client,
+            )
+            collision_shape = -1
+            if self.rcm_phantom_collision:
+                collision_shape = p.createCollisionShape(
+                    p.GEOM_MESH,
+                    fileName=str(mesh_path),
+                    meshScale=scale,
+                    flags=p.GEOM_FORCE_CONCAVE_TRIMESH,
+                    physicsClientId=self.client,
+                )
+            self.rcm_phantom_body_id = p.createMultiBody(
+                baseMass=0.0,
+                baseCollisionShapeIndex=collision_shape,
+                baseVisualShapeIndex=visual_shape,
+                basePosition=position,
+                baseOrientation=orientation,
+                physicsClientId=self.client,
+            )
+            p.changeDynamics(
+                self.rcm_phantom_body_id,
+                -1,
+                lateralFriction=0.8,
+                restitution=0.0,
+                physicsClientId=self.client,
+            )
+        except Exception as exc:
+            self.rcm_phantom_body_id = None
+            self.get_logger().error(
+                f"[RCM_PHANTOM] failed to load {mesh_path}: {exc}"
+            )
+
+    def _configure_gui_view(self):
+        if not self.gui:
+            return
+        if self.clean_gui:
+            p.configureDebugVisualizer(
+                p.COV_ENABLE_GUI,
+                0,
+                physicsClientId=self.client,
+            )
+        p.configureDebugVisualizer(
+            p.COV_ENABLE_SHADOWS,
+            1,
+            physicsClientId=self.client,
+        )
+        p.resetDebugVisualizerCamera(
+            cameraDistance=self.camera_distance_m,
+            cameraYaw=self.camera_yaw_deg,
+            cameraPitch=self.camera_pitch_deg,
+            cameraTargetPosition=self.camera_target,
+            physicsClientId=self.client,
+        )
+
+    def _make_rgbd_header(self):
+        header = Header()
+        header.stamp = self.get_clock().now().to_msg()
+        header.frame_id = self.rgbd_optical_frame
+        return header
+
+    def _publish_rgbd(self):
+        if self.camera is None:
+            return
+        rgb, depth_buffer, _segmentation = self.camera.render()
+        depth_m = depth_buffer_to_meters(
+            depth_buffer,
+            near=self.rgbd_camera_config.near,
+            far=self.rgbd_camera_config.far,
+        )
+        header = self._make_rgbd_header()
+        fx, fy, cx, cy = self.camera.intrinsics()
+        self.pub_color.publish(rgb_to_imgmsg(rgb, header))
+        self.pub_depth.publish(depth32f_to_imgmsg(depth_m, header))
+        self.pub_camera_info.publish(
+            make_camera_info(
+                width=self.rgbd_width,
+                height=self.rgbd_height,
+                fx=fx,
+                fy=fy,
+                cx=cx,
+                cy=cy,
+                header=header,
+            )
+        )
+
+        translation, quat = view_matrix_to_world_optical_tf(
+            self.camera.view_matrix()
+        )
+        transform = TransformStamped()
+        transform.header.stamp = header.stamp
+        transform.header.frame_id = "world"
+        transform.child_frame_id = self.rgbd_optical_frame
+        transform.transform.translation.x = float(translation[0])
+        transform.transform.translation.y = float(translation[1])
+        transform.transform.translation.z = float(translation[2])
+        transform.transform.rotation.x = float(quat[0])
+        transform.transform.rotation.y = float(quat[1])
+        transform.transform.rotation.z = float(quat[2])
+        transform.transform.rotation.w = float(quat[3])
+        self.tf_broadcaster.sendTransform(transform)
+
+    def _publish_rgbd_if_due(self, now_sec: float):
+        if (
+            self.camera is None
+            or not self.rgbd_runtime_enabled
+            or now_sec - self.last_rgbd_time < 1.0 / self.rgbd_hz
+        ):
+            return
+        self._publish_rgbd()
+        self.last_rgbd_time = now_sec
+
+    def on_rgbd_enable(self, msg: Bool):
+        enabled = bool(msg.data) and self.enable_rgbd_camera
+        if enabled == self.rgbd_runtime_enabled:
+            return
+        self.rgbd_runtime_enabled = enabled
+        if enabled:
+            self.last_rgbd_time = float("-inf")
+        self.get_logger().info(
+            f"[RGBD] runtime enabled={str(enabled).lower()}"
+        )
 
     def on_q_des(self, msg: Float64MultiArray):
         if msg.data and len(msg.data) >= self.n:
@@ -234,6 +837,38 @@ class IiwaPybulletSim(Node):
             self.set_mode(self.MODE_POSITION)
         elif self.control_mode == self.MODE_POSITION:
             self.set_mode(self.MODE_FREE)
+
+    def on_rcm_point(self, msg: PointStamped):
+        point = [float(msg.point.x), float(msg.point.y), float(msg.point.z)]
+        with self._lock:
+            self.latest_rcm_point = point
+            self.latest_rcm_point_time = self.get_clock().now().nanoseconds * 1e-9
+
+    def on_rcm_tip_point(self, msg: PointStamped):
+        point = [float(msg.point.x), float(msg.point.y), float(msg.point.z)]
+        with self._lock:
+            self.latest_tip_point = point
+            self.latest_tip_point_time = self.get_clock().now().nanoseconds * 1e-9
+
+    def on_locked_port_point(self, msg: PointStamped):
+        point = [float(msg.point.x), float(msg.point.y), float(msg.point.z)]
+        with self._lock:
+            self.latest_port_point = point
+            self.latest_port_pose_time = (
+                self.get_clock().now().nanoseconds * 1e-9
+            )
+
+    def on_locked_port_axis(self, msg: Vector3Stamped):
+        axis = [
+            float(msg.vector.x),
+            float(msg.vector.y),
+            float(msg.vector.z),
+        ]
+        with self._lock:
+            self.latest_port_axis = axis
+            self.latest_port_pose_time = (
+                self.get_clock().now().nanoseconds * 1e-9
+            )
 
     def set_mode(self, new_mode: int):
         with self._lock:
@@ -286,6 +921,559 @@ class IiwaPybulletSim(Node):
         msg.velocity = qd
         msg.effort = tau
         self.pub_js.publish(msg)
+
+    def _setup_rcm_debug_overlay(self):
+        self.rcm_marker_body_id = None
+        self.rcm_tip_marker_body_id = None
+        self.rcm_label_id = -1
+        self.rcm_tip_label_id = -1
+        self.ee_trace_visual_shape_id = None
+        self.ee_trace_body_ids = []
+        self.ee_trace_last_point = None
+        self.rcm_trace_started = False
+        self.rcm_tool_shaft_body_id = None
+        self.rcm_tool_mount_body_id = None
+        self.rcm_tool_tip_body_id = None
+        self.dvrk_lnd_body_id = None
+        self.dvrk_lnd_joint_indices = {}
+        self.port_ring_line_ids = []
+        self.port_axis_line_ids = []
+        self.port_label_id = -1
+        self.port_overlay_signature = None
+        self.port_overlay_visible = False
+
+        if (
+            not self.show_rcm_debug_markers
+            and not self.show_rcm_tool
+            and not self.show_dvrk_lnd_gripper
+            and not self.show_port_detection_overlay
+        ):
+            return
+
+        hidden = [0.0, 0.0, -10.0]
+        if self.show_rcm_debug_markers:
+            rcm_visual = p.createVisualShape(
+                p.GEOM_SPHERE,
+                radius=self.rcm_marker_radius_m,
+                rgbaColor=[1.0, 0.05, 0.05, 0.95],
+                physicsClientId=self.client,
+            )
+            tip_visual = p.createVisualShape(
+                p.GEOM_SPHERE,
+                radius=self.rcm_tip_marker_radius_m,
+                rgbaColor=[1.0, 0.86, 0.05, 0.90],
+                physicsClientId=self.client,
+            )
+            self.ee_trace_visual_shape_id = p.createVisualShape(
+                p.GEOM_SPHERE,
+                radius=self.ee_trace_point_radius_m,
+                rgbaColor=[0.05, 0.95, 0.35, 0.82],
+                physicsClientId=self.client,
+            )
+            self.rcm_marker_body_id = p.createMultiBody(
+                baseMass=0.0,
+                baseCollisionShapeIndex=-1,
+                baseVisualShapeIndex=rcm_visual,
+                basePosition=hidden,
+                physicsClientId=self.client,
+            )
+            self.rcm_tip_marker_body_id = p.createMultiBody(
+                baseMass=0.0,
+                baseCollisionShapeIndex=-1,
+                baseVisualShapeIndex=tip_visual,
+                basePosition=hidden,
+                physicsClientId=self.client,
+            )
+
+        if self.show_rcm_tool:
+            shaft_length = self.rcm_tool_length_m
+            if self.show_dvrk_lnd_gripper:
+                shaft_length -= self.dvrk_lnd_tip_offset_m
+            shaft_visual = p.createVisualShape(
+                p.GEOM_CYLINDER,
+                radius=self.rcm_tool_radius_m,
+                length=shaft_length,
+                rgbaColor=[0.68, 0.72, 0.76, 1.0],
+                specularColor=[0.9, 0.9, 0.9],
+                physicsClientId=self.client,
+            )
+            mount_visual = p.createVisualShape(
+                p.GEOM_CYLINDER,
+                radius=self.rcm_tool_mount_radius_m,
+                length=self.rcm_tool_mount_length_m,
+                rgbaColor=[0.16, 0.19, 0.22, 1.0],
+                specularColor=[0.45, 0.45, 0.45],
+                physicsClientId=self.client,
+            )
+            self.rcm_tool_shaft_body_id = p.createMultiBody(
+                baseMass=0.0,
+                baseCollisionShapeIndex=-1,
+                baseVisualShapeIndex=shaft_visual,
+                basePosition=hidden,
+                physicsClientId=self.client,
+            )
+            self.rcm_tool_mount_body_id = p.createMultiBody(
+                baseMass=0.0,
+                baseCollisionShapeIndex=-1,
+                baseVisualShapeIndex=mount_visual,
+                basePosition=hidden,
+                physicsClientId=self.client,
+            )
+            if not self.show_dvrk_lnd_gripper:
+                tip_visual = p.createVisualShape(
+                    p.GEOM_SPHERE,
+                    radius=1.15 * self.rcm_tool_radius_m,
+                    rgbaColor=[0.82, 0.85, 0.88, 1.0],
+                    specularColor=[1.0, 1.0, 1.0],
+                    physicsClientId=self.client,
+                )
+                self.rcm_tool_tip_body_id = p.createMultiBody(
+                    baseMass=0.0,
+                    baseCollisionShapeIndex=-1,
+                    baseVisualShapeIndex=tip_visual,
+                    basePosition=hidden,
+                    physicsClientId=self.client,
+                )
+
+        if self.show_dvrk_lnd_gripper:
+            urdf_path = Path(self.dvrk_lnd_urdf_path).expanduser()
+            if not urdf_path.is_file():
+                self.get_logger().warning(
+                    f"[DVRK_LND] URDF not found: {urdf_path}"
+                )
+                return
+            try:
+                self.dvrk_lnd_body_id = p.loadURDF(
+                    str(urdf_path.resolve()),
+                    basePosition=hidden,
+                    useFixedBase=True,
+                    flags=p.URDF_USE_MATERIAL_COLORS_FROM_MTL,
+                    physicsClientId=self.client,
+                )
+                for joint_index in range(
+                    p.getNumJoints(
+                        self.dvrk_lnd_body_id,
+                        physicsClientId=self.client,
+                    )
+                ):
+                    info = p.getJointInfo(
+                        self.dvrk_lnd_body_id,
+                        joint_index,
+                        physicsClientId=self.client,
+                    )
+                    name = info[1].decode("utf-8")
+                    self.dvrk_lnd_joint_indices[name] = joint_index
+            except p.error as exc:
+                self.dvrk_lnd_body_id = None
+                self.get_logger().error(f"[DVRK_LND] failed to load URDF: {exc}")
+
+    def _hide_body(self, body_id):
+        if body_id is None:
+            return
+        p.resetBasePositionAndOrientation(
+            body_id,
+            [0.0, 0.0, -10.0],
+            [0.0, 0.0, 0.0, 1.0],
+            physicsClientId=self.client,
+        )
+
+    def _set_marker_body(self, body_id, point):
+        if body_id is None:
+            return
+        p.resetBasePositionAndOrientation(
+            body_id,
+            point,
+            [0.0, 0.0, 0.0, 1.0],
+            physicsClientId=self.client,
+        )
+
+    def _set_marker_label(self, label_id, text, point, color):
+        return p.addUserDebugText(
+            text,
+            [point[0], point[1], point[2] + 0.035],
+            textColorRGB=color,
+            textSize=1.0,
+            lifeTime=0.0,
+            replaceItemUniqueId=label_id,
+            physicsClientId=self.client,
+        )
+
+    def _set_debug_line(self, line_id, start, end, color, width):
+        return p.addUserDebugLine(
+            start,
+            end,
+            lineColorRGB=color,
+            lineWidth=width,
+            lifeTime=0.0,
+            replaceItemUniqueId=line_id,
+            physicsClientId=self.client,
+        )
+
+    def _hide_port_detection_overlay(self):
+        if not self.port_overlay_visible:
+            return
+        hidden = [0.0, 0.0, -10.0]
+        for line_id in self.port_ring_line_ids + self.port_axis_line_ids:
+            self._set_debug_line(
+                line_id,
+                hidden,
+                hidden,
+                [0.0, 0.0, 0.0],
+                1.0,
+            )
+        self.port_label_id = self._set_marker_label(
+            self.port_label_id,
+            "",
+            hidden,
+            [0.0, 0.9, 1.0],
+        )
+        self.port_overlay_signature = None
+        self.port_overlay_visible = False
+
+    def _update_port_detection_overlay(self, point, axis):
+        axis_norm = sum(value * value for value in axis) ** 0.5
+        if axis_norm < 1e-8:
+            self._hide_port_detection_overlay()
+            return
+        axis = [value / axis_norm for value in axis]
+        signature = tuple(round(value, 5) for value in point + axis)
+        if self.port_overlay_visible and signature == self.port_overlay_signature:
+            return
+
+        def cross(a, b):
+            return [
+                a[1] * b[2] - a[2] * b[1],
+                a[2] * b[0] - a[0] * b[2],
+                a[0] * b[1] - a[1] * b[0],
+            ]
+
+        def unit(vector):
+            norm = max(sum(value * value for value in vector) ** 0.5, 1e-9)
+            return [value / norm for value in vector]
+
+        reference = [0.0, 0.0, 1.0]
+        if abs(sum(axis[index] * reference[index] for index in range(3))) > 0.9:
+            reference = [0.0, 1.0, 0.0]
+        basis_1 = unit(cross(axis, reference))
+        basis_2 = unit(cross(axis, basis_1))
+        cyan = [0.0, 0.9, 1.0]
+
+        ring_points = []
+        ring_segments = 24
+        for index in range(ring_segments):
+            angle = 2.0 * 3.141592653589793 * index / ring_segments
+            ring_points.append(
+                [
+                    point[dimension]
+                    + self.port_overlay_ring_radius_m
+                    * (
+                        math.cos(angle) * basis_1[dimension]
+                        + math.sin(angle) * basis_2[dimension]
+                    )
+                    for dimension in range(3)
+                ]
+            )
+        new_ring_ids = []
+        for index in range(ring_segments):
+            line_id = (
+                self.port_ring_line_ids[index]
+                if index < len(self.port_ring_line_ids)
+                else -1
+            )
+            new_ring_ids.append(
+                self._set_debug_line(
+                    line_id,
+                    ring_points[index],
+                    ring_points[(index + 1) % ring_segments],
+                    cyan,
+                    3.0,
+                )
+            )
+        self.port_ring_line_ids = new_ring_ids
+
+        outside = [
+            point[index] - self.port_overlay_axis_outside_m * axis[index]
+            for index in range(3)
+        ]
+        inside = [
+            point[index] + self.port_overlay_axis_inside_m * axis[index]
+            for index in range(3)
+        ]
+        arrow_back = [
+            inside[index] - 0.018 * axis[index]
+            for index in range(3)
+        ]
+        arrow_left = [
+            arrow_back[index] + 0.007 * basis_1[index]
+            for index in range(3)
+        ]
+        arrow_right = [
+            arrow_back[index] - 0.007 * basis_1[index]
+            for index in range(3)
+        ]
+        axis_segments = [
+            (outside, inside),
+            (inside, arrow_left),
+            (inside, arrow_right),
+        ]
+        new_axis_ids = []
+        for index, (start, end) in enumerate(axis_segments):
+            line_id = (
+                self.port_axis_line_ids[index]
+                if index < len(self.port_axis_line_ids)
+                else -1
+            )
+            new_axis_ids.append(
+                self._set_debug_line(line_id, start, end, cyan, 4.0)
+            )
+        self.port_axis_line_ids = new_axis_ids
+        label_point = [
+            point[index] + 0.018 * basis_2[index]
+            for index in range(3)
+        ]
+        self.port_label_id = self._set_marker_label(
+            self.port_label_id,
+            "PORT CENTER",
+            label_point,
+            cyan,
+        )
+        self.port_overlay_signature = signature
+        self.port_overlay_visible = True
+
+    def _get_ee_pose_and_tool_tip(self):
+        link_state = p.getLinkState(
+            self.robot_id,
+            self.n - 1,
+            computeForwardKinematics=True,
+            physicsClientId=self.client,
+        )
+        ee_point = [float(value) for value in link_state[4]]
+        ee_quat = [float(value) for value in link_state[5]]
+        tool_tip, _ = p.multiplyTransforms(
+            ee_point,
+            ee_quat,
+            [0.0, 0.0, self.rcm_tool_length_m],
+            [0.0, 0.0, 0.0, 1.0],
+            physicsClientId=self.client,
+        )
+        return ee_point, ee_quat, [float(value) for value in tool_tip]
+
+    def _update_rcm_tool_visual(self, ee_point, ee_quat, tool_tip):
+        if not self.show_rcm_tool and self.dvrk_lnd_body_id is None:
+            return
+
+        shaft_length = self.rcm_tool_length_m
+        if self.dvrk_lnd_body_id is not None:
+            shaft_length -= self.dvrk_lnd_tip_offset_m
+        shaft_center, _ = p.multiplyTransforms(
+            ee_point,
+            ee_quat,
+            [0.0, 0.0, 0.5 * shaft_length],
+            [0.0, 0.0, 0.0, 1.0],
+            physicsClientId=self.client,
+        )
+        mount_center, _ = p.multiplyTransforms(
+            ee_point,
+            ee_quat,
+            [0.0, 0.0, 0.5 * self.rcm_tool_mount_length_m],
+            [0.0, 0.0, 0.0, 1.0],
+            physicsClientId=self.client,
+        )
+        if self.show_rcm_tool:
+            p.resetBasePositionAndOrientation(
+                self.rcm_tool_shaft_body_id,
+                shaft_center,
+                ee_quat,
+                physicsClientId=self.client,
+            )
+            p.resetBasePositionAndOrientation(
+                self.rcm_tool_mount_body_id,
+                mount_center,
+                ee_quat,
+                physicsClientId=self.client,
+            )
+            if self.rcm_tool_tip_body_id is not None:
+                p.resetBasePositionAndOrientation(
+                    self.rcm_tool_tip_body_id,
+                    tool_tip,
+                    ee_quat,
+                    physicsClientId=self.client,
+                )
+
+        if self.dvrk_lnd_body_id is not None:
+            gripper_root, _ = p.multiplyTransforms(
+                ee_point,
+                ee_quat,
+                [0.0, 0.0, shaft_length],
+                [0.0, 0.0, 0.0, 1.0],
+                physicsClientId=self.client,
+            )
+            p.resetBasePositionAndOrientation(
+                self.dvrk_lnd_body_id,
+                gripper_root,
+                ee_quat,
+                physicsClientId=self.client,
+            )
+            for name in ("wrist_pitch", "wrist_yaw"):
+                if name in self.dvrk_lnd_joint_indices:
+                    p.resetJointState(
+                        self.dvrk_lnd_body_id,
+                        self.dvrk_lnd_joint_indices[name],
+                        0.0,
+                        physicsClientId=self.client,
+                    )
+            for name in ("jaw_1", "jaw_2"):
+                if name in self.dvrk_lnd_joint_indices:
+                    p.resetJointState(
+                        self.dvrk_lnd_body_id,
+                        self.dvrk_lnd_joint_indices[name],
+                        self.dvrk_lnd_jaw_angle_rad,
+                        physicsClientId=self.client,
+                    )
+
+    def _update_rcm_debug_overlay(self, record_trace=True):
+        if (
+            not self.show_rcm_debug_markers
+            and not self.show_rcm_tool
+            and self.dvrk_lnd_body_id is None
+            and not self.show_port_detection_overlay
+        ):
+            return
+
+        ee_point, ee_quat, tool_tip = self._get_ee_pose_and_tool_tip()
+        self._update_rcm_tool_visual(ee_point, ee_quat, tool_tip)
+
+        now_sec = self.get_clock().now().nanoseconds * 1e-9
+        if self.show_port_detection_overlay:
+            with self._lock:
+                port_point = (
+                    None
+                    if self.latest_port_point is None
+                    else list(self.latest_port_point)
+                )
+                port_axis = (
+                    None
+                    if self.latest_port_axis is None
+                    else list(self.latest_port_axis)
+                )
+                port_time = self.latest_port_pose_time
+            port_pose_fresh = (
+                port_point is not None
+                and port_axis is not None
+                and (
+                    self.port_overlay_max_age_sec <= 0.0
+                    or now_sec - port_time <= self.port_overlay_max_age_sec
+                )
+            )
+            if port_pose_fresh:
+                self._update_port_detection_overlay(port_point, port_axis)
+            else:
+                self._hide_port_detection_overlay()
+
+        if not self.show_rcm_debug_markers:
+            return
+
+        with self._lock:
+            rcm_point = None if self.latest_rcm_point is None else list(self.latest_rcm_point)
+            rcm_time = self.latest_rcm_point_time
+            tip_point = None if self.latest_tip_point is None else list(self.latest_tip_point)
+            tip_time = self.latest_tip_point_time
+
+        if (
+            rcm_point is not None
+            and (
+                self.rcm_marker_max_age_sec <= 0.0
+                or now_sec - rcm_time <= self.rcm_marker_max_age_sec
+            )
+        ):
+            if not self.rcm_trace_started:
+                self.ee_trace_last_point = None
+                self.rcm_trace_started = True
+            self._set_marker_body(self.rcm_marker_body_id, rcm_point)
+            self.rcm_label_id = self._set_marker_label(
+                self.rcm_label_id,
+                "RCM",
+                rcm_point,
+                [1.0, 0.05, 0.05],
+            )
+        else:
+            self._hide_body(self.rcm_marker_body_id)
+            self.rcm_label_id = self._set_marker_label(
+                self.rcm_label_id,
+                "",
+                [0.0, 0.0, -10.0],
+                [1.0, 0.05, 0.05],
+            )
+
+        if (
+            tip_point is not None
+            and (
+                self.rcm_marker_max_age_sec <= 0.0
+                or now_sec - tip_time <= self.rcm_marker_max_age_sec
+            )
+        ):
+            self._set_marker_body(self.rcm_tip_marker_body_id, tip_point)
+            self.rcm_tip_label_id = self._set_marker_label(
+                self.rcm_tip_label_id,
+                "TIP",
+                tip_point,
+                [1.0, 0.86, 0.05],
+            )
+        else:
+            self._hide_body(self.rcm_tip_marker_body_id)
+            self.rcm_tip_label_id = self._set_marker_label(
+                self.rcm_tip_label_id,
+                "",
+                [0.0, 0.0, -10.0],
+                [1.0, 0.86, 0.05],
+            )
+
+        if not record_trace:
+            return
+
+        if rcm_point is not None and self.rcm_trace_min_inserted_depth_m > 0.0:
+            shaft = [
+                tool_tip[index] - ee_point[index]
+                for index in range(3)
+            ]
+            shaft_norm = max(
+                sum(value * value for value in shaft) ** 0.5,
+                1e-9,
+            )
+            shaft = [value / shaft_norm for value in shaft]
+            inserted_depth = sum(
+                (tool_tip[index] - rcm_point[index]) * shaft[index]
+                for index in range(3)
+            )
+            if inserted_depth < self.rcm_trace_min_inserted_depth_m:
+                return
+
+        trace_point = (
+            tool_tip
+            if self.show_rcm_tool and self.trace_rcm_tool_tip
+            else ee_point
+        )
+        if self.ee_trace_last_point is not None:
+            dist_sq = sum(
+                (trace_point[index] - self.ee_trace_last_point[index]) ** 2
+                for index in range(3)
+            )
+            if dist_sq < self.ee_trace_min_dist_m * self.ee_trace_min_dist_m:
+                return
+
+        body_id = p.createMultiBody(
+            baseMass=0.0,
+            baseCollisionShapeIndex=-1,
+            baseVisualShapeIndex=self.ee_trace_visual_shape_id,
+            basePosition=trace_point,
+            physicsClientId=self.client,
+        )
+        self.ee_trace_body_ids.append(body_id)
+        self.ee_trace_last_point = list(trace_point)
+
+        while len(self.ee_trace_body_ids) > self.ee_trace_max_points:
+            old_body_id = self.ee_trace_body_ids.pop(0)
+            p.removeBody(old_body_id, physicsClientId=self.client)
 
     def _send_init_done_once(self):
         if self._init_done_sent:
@@ -392,12 +1580,41 @@ class IiwaPybulletSim(Node):
             )
 
         p.stepSimulation(physicsClientId=self.client)
+        if self.goto_use_reset:
+            for array_index, joint_index in enumerate(self.joint_indices):
+                p.resetJointState(
+                    self.robot_id,
+                    joint_index,
+                    q_ref[array_index],
+                    targetVelocity=0.0,
+                    physicsClientId=self.client,
+                )
         self.publish_joint_states()
+        self._update_rcm_debug_overlay(record_trace=False)
 
-        if progress >= 1.0:
+        q_actual, qd_actual, _ = self._get_q_qd_tau()
+        position_error = max(
+            abs(q_actual[index] - self.init_q[index])
+            for index in range(self.n)
+        )
+        max_velocity = max(abs(value) for value in qd_actual)
+        if (
+            progress >= 1.0
+            and position_error <= self.goto_pos_tolerance_rad
+            and max_velocity <= self.goto_vel_tolerance_rad_s
+        ):
+            self.goto_settle_count += 1
+        else:
+            self.goto_settle_count = 0
+
+        if self.goto_settle_count >= self.goto_settle_cycles:
             self.phase = "RUN"
             self._send_init_done_once()
-            self.get_logger().info("[GOTO] done -> RUN")
+            self.get_logger().info(
+                "[GOTO] settled -> RUN: "
+                f"position_error={position_error:.4f} rad, "
+                f"max_velocity={max_velocity:.4f} rad/s"
+            )
 
     def _step_run(self):
         with self._lock:
@@ -420,13 +1637,16 @@ class IiwaPybulletSim(Node):
 
         p.stepSimulation(physicsClientId=self.client)
         self.publish_joint_states()
+        self._update_rcm_debug_overlay()
 
     def step(self):
         now_sec = self.get_clock().now().nanoseconds * 1e-9
         if self.phase == "GOTO":
             self._step_goto(now_sec)
+            self._publish_rgbd_if_due(now_sec)
             return
         self._step_run()
+        self._publish_rgbd_if_due(now_sec)
 
     def destroy_node(self):
         try:
@@ -445,12 +1665,13 @@ def main(args=None):
 
     try:
         executor.spin()
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         executor.shutdown()
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

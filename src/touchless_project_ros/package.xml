@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>touchless_project</name>
+  <version>0.1.0</version>
+  <description>ROS 2 wrapper package for the touchless gesture control project.</description>
+  <maintainer email="jackysqing@gmail.com">siqin</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <depend>ament_index_python</depend>
+  <depend>geometry_msgs</depend>
+  <depend>iiwa_cpp_controller</depend>
+  <depend>iiwa_state_udp_bridge</depend>
+  <depend>pybullet_ros2_sim</depend>
+  <depend>rclpy</depend>
+  <depend>robot_monitor</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

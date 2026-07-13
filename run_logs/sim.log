@@ -1,19 +1,8 @@
 pybullet build time: Jan 29 2025 23:16:28
-[INFO] [1769462567.964604033] [iiwa_pybullet_sim_node]: [MODE] -> TORQUE_CONTROL
-[INFO] [1769462567.964837788] [iiwa_pybullet_sim_node]: Iiwa PyBullet sim node started.
-[INFO] [1769462567.964951528] [iiwa_pybullet_sim_node]: Mode switch via /iiwa7/control_mode (std_msgs/Int8): 0=FREE, 1=POSITION, 2=TORQUE
-[INFO] [1769462567.965066053] [iiwa_pybullet_sim_node]: Examples:
-[INFO] [1769462567.965175292] [iiwa_pybullet_sim_node]:   ros2 topic pub --once /iiwa7/control_mode std_msgs/msg/Int8 '{data: 1}'
-[INFO] [1769462567.965278989] [iiwa_pybullet_sim_node]:   ros2 topic pub --once /iiwa7/control_mode std_msgs/msg/Int8 '{data: 2}'
-[INFO] [1769462567.965382805] [iiwa_pybullet_sim_node]:   ros2 topic pub --once /iiwa7/control_mode std_msgs/msg/Int8 '{data: 0}'
-[INFO] [1769462568.966385167] [iiwa_pybullet_sim_node]: [DBG] phase=GOTO, mode=TAU, have_des=False, have_tau=True, q0=0.000, tau0=-0.00
-[INFO] [1769462569.962289217] [iiwa_pybullet_sim_node]: [INIT] Published latched /iiwa7/init_done = True
-[INFO] [1769462569.962519816] [iiwa_pybullet_sim_node]: [GOTO] done -> RUN
-[INFO] [1769462569.965519156] [iiwa_pybullet_sim_node]: [DBG] phase=RUN, mode=TAU, have_des=False, have_tau=True, q0=0.000, tau0=0.01
-[INFO] [1769462570.967056562] [iiwa_pybullet_sim_node]: [DBG] phase=RUN, mode=TAU, have_des=False, have_tau=True, q0=0.000, tau0=-19.83
-[INFO] [1769462571.970905513] [iiwa_pybullet_sim_node]: [DBG] phase=RUN, mode=TAU, have_des=False, have_tau=True, q0=0.000, tau0=180.17
-[INFO] [1769462572.965564479] [iiwa_pybullet_sim_node]: [DBG] phase=RUN, mode=TAU, have_des=False, have_tau=True, q0=0.000, tau0=169.17
-X connection to :1 broken (explicit kill or server shutdown).
+[INFO] [1781771784.582424031] [iiwa_pybullet_rgbd_sim_node]: [KEYPOINT_OVERLAY] enabled: topic=/gms_keypoints/selected_keypoint_3d valid_topic=/gms_keypoints/valid radius=0.012m
+[INFO] [1781771785.540861815] [iiwa_pybullet_rgbd_sim_node]: [SCENE] added white sorting tray center=(0.555, 0.150) size=(0.260, 0.170)
+[INFO] [1781771785.658287607] [iiwa_pybullet_rgbd_sim_node]: [SCENE] loaded 2 split silver surgical instrument assets for medical_grasp
+[INFO] [1781771785.743490568] [iiwa_pybullet_rgbd_sim_node]: iiwa_pybullet_rgbd_sim_node started
 startThreads creating 1 threads.
 starting thread 0
 started thread 0 
@@ -42,4 +31,33 @@ started thread 0
 MotionThreadFunc thread started
 ven = Mesa
 ven = Mesa
+numActiveThreads = 0
+stopping threads
+Thread with taskId 0 exiting
+Thread TERMINATED
+destroy semaphore
+semaphore destroyed
+destroy main semaphore
+main semaphore destroyed
+finished
+numActiveThreads = 0
+btShutDownExampleBrowser stopping threads
+Thread with taskId 0 exiting
+Thread TERMINATED
+destroy semaphore
+semaphore destroyed
+destroy main semaphore
+main semaphore destroyed
+Traceback (most recent call last):
+  File "/home/siqin/ros2_workspaces/humble/ros2_pybullet_ws/install/pybullet_ros2_sim/lib/pybullet_ros2_sim/iiwa_pybullet_rgbd_sim_node", line 33, in <module>
+    sys.exit(load_entry_point('pybullet-ros2-sim', 'console_scripts', 'iiwa_pybullet_rgbd_sim_node')())
+  File "/home/siqin/ros2_workspaces/humble/ros2_pybullet_ws/build/pybullet_ros2_sim/pybullet_ros2_sim/iiwa_pybullet_rgbd_sim_node.py", line 3397, in main
+    rclpy.shutdown()
+  File "/opt/ros/humble/local/lib/python3.10/dist-packages/rclpy/__init__.py", line 130, in shutdown
+    _shutdown(context=context)
+  File "/opt/ros/humble/local/lib/python3.10/dist-packages/rclpy/utilities.py", line 58, in shutdown
+    return context.shutdown()
+  File "/opt/ros/humble/local/lib/python3.10/dist-packages/rclpy/context.py", line 102, in shutdown
+    self.__context.shutdown()
+rclpy._rclpy_pybind11.RCLError: failed to shutdown: rcl_shutdown already called on the given context, at ./src/rcl/init.c:241
 [ros2run]: Process exited with failure 1

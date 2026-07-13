@@ -1,0 +1,376 @@
+[INFO] [1781735550.585440746] [robot_monitor]: robot_monitor perception subscriptions: prompt=/sam3/prompt valid=/perception/valid keypoint=/perception/keypoint_3d candidates=/perception/keypoint_candidates_text
+[INFO] [1781735550.679620155] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735551.718371724] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735552.718461484] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735553.770458627] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735554.818820534] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735555.819001871] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735556.868489687] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735557.918069560] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735558.918465240] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735559.918506954] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735560.918853004] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735561.920989974] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735562.968399487] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735563.968933237] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735565.018833002] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735566.070992479] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735567.118279693] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735568.168995333] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735569.218127609] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735570.268181631] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735571.269080065] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735572.269666354] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735573.320980913] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735574.368632795] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735575.418510875] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735576.418943811] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735577.468930127] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735578.468997562] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735579.518324396] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735580.518995835] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735581.568036589] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735582.568183571] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735583.568861604] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735584.570048955] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735585.618358484] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735586.618927715] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735587.620147699] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735588.668383256] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735589.718818629] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735590.719172315] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735591.769449242] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735592.818626704] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735593.868052712] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735594.868496988] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735595.870224769] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735596.918182127] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735597.918849688] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735598.918984447] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735599.968441287] [robot_monitor]: Prompt: <none> | Keypoint: waiting for /sam3/prompt
+[INFO] [1781735600.969015523] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint: waiting
+[INFO] [1781735602.018996708] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint: waiting
+[INFO] [1781735603.068166867] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint: waiting
+[INFO] [1781735604.068347043] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint: waiting
+[INFO] [1781735605.069233828] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint: waiting
+[INFO] [1781735606.118382064] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint: waiting
+[INFO] [1781735607.118692246] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint: waiting
+[INFO] [1781735608.119024186] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint: waiting
+[INFO] [1781735609.168525272] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint: waiting
+[INFO] [1781735610.168796756] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint: waiting
+[INFO] [1781735611.168972312] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint: waiting
+[INFO] [1781735612.168987858] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint: waiting
+[INFO] [1781735613.218274998] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint: waiting
+[INFO] [1781735614.218980810] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint: waiting
+[INFO] [1781735615.268204106] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint: waiting
+[INFO] [1781735615.618368504] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(-0.053,-0.014,0.925)
+[INFO] [1781735616.269069527] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint[sim_camera_color_optical_frame] x=-0.059 y=-0.014 z=0.924 age=0.55s
+[INFO] [1781735616.621012143] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(-0.053,-0.014,0.925)
+[INFO] [1781735617.269143176] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint[sim_camera_color_optical_frame] x=-0.059 y=-0.014 z=0.924 age=0.72s
+[INFO] [1781735617.668257003] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(-0.053,-0.014,0.925)
+[INFO] [1781735618.318471595] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint[sim_camera_color_optical_frame] x=-0.059 y=-0.013 z=0.925 age=0.78s
+[INFO] [1781735618.668687799] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(-0.049,-0.015,0.926)
+[INFO] [1781735619.368962588] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint[sim_camera_color_optical_frame] x=-0.057 y=-0.013 z=0.925 age=0.71s
+[INFO] [1781735619.718856793] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(-0.049,-0.015,0.926)
+[INFO] [1781735620.418910175] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint[sim_camera_color_optical_frame] x=-0.057 y=-0.013 z=0.925 age=0.96s
+[INFO] [1781735620.768396552] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(-0.050,-0.015,0.926)
+[INFO] [1781735621.422965475] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint[sim_camera_color_optical_frame] x=-0.057 y=-0.013 z=0.925 age=0.90s
+[INFO] [1781735621.768496534] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(-0.050,-0.015,0.926)
+[INFO] [1781735622.469156480] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint[sim_camera_color_optical_frame] x=-0.056 y=-0.013 z=0.925 age=0.93s
+[INFO] [1781735622.768904469] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(-0.051,-0.016,0.926)
+[INFO] [1781735623.518540919] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint[sim_camera_color_optical_frame] x=-0.056 y=-0.013 z=0.925 age=0.81s
+[INFO] [1781735623.818581576] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(-0.050,-0.016,0.926)
+[INFO] [1781735624.568111427] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint[sim_camera_color_optical_frame] x=-0.056 y=-0.013 z=0.925 age=0.94s
+[INFO] [1781735624.869066085] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(-0.060,-0.016,0.928)
+[INFO] [1781735625.574005790] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint[sim_camera_color_optical_frame]: invalid (stale 1.02s)
+[INFO] [1781735625.919014144] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(-0.050,-0.015,0.926)
+[INFO] [1781735626.574333040] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint[sim_camera_color_optical_frame] x=-0.056 y=-0.013 z=0.925 age=0.91s
+[INFO] [1781735626.968554637] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(-0.050,-0.015,0.926)
+[INFO] [1781735627.618478994] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint[sim_camera_color_optical_frame] x=-0.056 y=-0.013 z=0.925 age=0.67s
+[INFO] [1781735627.980086898] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(-0.049,-0.015,0.926)
+[INFO] [1781735628.618565866] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint[sim_camera_color_optical_frame] x=-0.056 y=-0.013 z=0.925 age=0.54s
+[INFO] [1781735629.018848032] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(-0.049,-0.015,0.926)
+[INFO] [1781735629.668084705] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint[sim_camera_color_optical_frame]: invalid (stale 1.03s)
+[INFO] [1781735630.019048831] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(-0.059,-0.014,0.925)
+[INFO] [1781735630.668878616] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint[sim_camera_color_optical_frame]: invalid (stale 2.03s)
+[INFO] [1781735631.068310844] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(-0.059,-0.014,0.925)
+[INFO] [1781735631.719086290] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint[sim_camera_color_optical_frame] x=-0.056 y=-0.013 z=0.925 age=0.72s
+[INFO] [1781735632.069006535] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(-0.051,-0.015,0.926)
+[INFO] [1781735632.768261067] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint[sim_camera_color_optical_frame]: invalid (stale 1.06s)
+[INFO] [1781735633.118839414] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(-0.051,-0.015,0.926)
+[INFO] [1781735633.818370143] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint[sim_camera_color_optical_frame] x=-0.056 y=-0.013 z=0.925 age=0.67s
+[INFO] [1781735634.119928086] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(-0.053,-0.014,0.926)
+[INFO] [1781735634.868164032] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint[sim_camera_color_optical_frame] x=-0.056 y=-0.013 z=0.925 age=0.72s
+[INFO] [1781735635.120007314] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(-0.050,-0.015,0.926)
+[INFO] [1781735635.870664070] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint[sim_camera_color_optical_frame] x=-0.057 y=-0.013 z=0.925 age=0.79s
+[INFO] [1781735636.123732622] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(-0.053,-0.014,0.926)
+[INFO] [1781735636.918690543] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint[sim_camera_color_optical_frame] x=-0.057 y=-0.013 z=0.925 age=0.96s
+[INFO] [1781735637.168713509] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(-0.051,-0.015,0.926)
+[INFO] [1781735637.968154395] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint[sim_camera_color_optical_frame]: invalid (stale 1.00s)
+[INFO] [1781735638.176361551] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(-0.050,-0.015,0.926)
+[INFO] [1781735638.968667653] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint[sim_camera_color_optical_frame]: invalid (stale 1.01s)
+[INFO] [1781735639.218730007] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(-0.050,-0.015,0.926)
+[INFO] [1781735639.969106718] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint[sim_camera_color_optical_frame] x=-0.056 y=-0.013 z=0.925 age=0.96s
+[INFO] [1781735640.234914038] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(-0.050,-0.015,0.925)
+[INFO] [1781735640.972057394] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint[sim_camera_color_optical_frame]: invalid (stale 1.27s)
+[INFO] [1781735641.268175753] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(-0.050,-0.015,0.925)
+[INFO] [1781735642.018807749] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint[sim_camera_color_optical_frame]: invalid (stale 1.09s)
+[INFO] [1781735642.268194267] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(-0.050,-0.015,0.926)
+[INFO] [1781735643.027285510] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint[sim_camera_color_optical_frame]: invalid (stale 2.10s)
+[INFO] [1781735643.268575241] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(-0.050,-0.015,0.926)
+[INFO] [1781735644.084563418] [robot_monitor]: Prompt: left silver surgical instrument | Keypoint[sim_camera_color_optical_frame]: invalid (stale 1.27s)
+[INFO] [1781735644.275531104] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.045,-0.014,0.926)
+[INFO] [1781735645.118252785] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame]: invalid (stale 1.60s)
+[INFO] [1781735645.318886057] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.045,-0.014,0.926)
+[INFO] [1781735646.157112707] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.49s
+[INFO] [1781735646.325231475] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.120,-0.082,0.958) #1=(0.134,-0.201,1.094) #2=(0.105,-0.264,1.145) #3=(0.107,-0.131,1.025)
+[INFO] [1781735647.160933101] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.40s
+[INFO] [1781735647.359213456] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.115,-0.082,0.958) #1=(0.126,-0.195,1.088) #2=(0.110,-0.264,1.143) #3=(0.107,-0.125,1.020)
+[INFO] [1781735648.171927674] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.53s
+[INFO] [1781735648.368877862] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.120,-0.090,0.954) #1=(0.158,-0.246,1.136) #2=(0.077,-0.253,1.136) #3=(0.110,-0.156,1.053)
+[INFO] [1781735649.193872718] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.72s
+[INFO] [1781735649.398354144] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.118,-0.086,0.954) #1=(0.158,-0.253,1.136) #2=(0.079,-0.246,1.136) #3=(0.117,-0.153,1.047)
+[INFO] [1781735650.248069068] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.61s
+[INFO] [1781735650.435458742] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.118,-0.082,0.958) #1=(0.115,-0.271,1.145) #2=(0.120,-0.213,1.107) #3=(0.109,-0.131,1.030)
+[INFO] [1781735651.257406505] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.54s
+[INFO] [1781735651.450414820] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.120,-0.086,0.954) #1=(0.075,-0.246,1.136) #2=(0.117,-0.153,1.047) #3=(0.155,-0.253,1.136)
+[INFO] [1781735652.287304304] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.84s
+[INFO] [1781735652.457652706] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.123,-0.082,0.958) #1=(0.109,-0.260,1.141) #2=(0.103,-0.125,1.020) #3=(0.132,-0.195,1.088)
+[INFO] [1781735653.303391233] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.91s
+[INFO] [1781735653.474651492] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.117,-0.082,0.958) #1=(0.112,-0.264,1.141) #2=(0.114,-0.125,1.025) #3=(0.120,-0.195,1.088)
+[INFO] [1781735654.338077915] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.89s
+[INFO] [1781735654.532694122] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.108,-0.086,0.954) #1=(0.120,-0.253,1.136) #2=(0.066,-0.169,1.059) #3=(0.142,-0.148,1.046)
+[INFO] [1781735655.371768178] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.112 y=-0.163 z=1.063 age=0.69s
+[INFO] [1781735655.568073529] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.118,-0.082,0.958) #1=(0.067,-0.171,1.064) #2=(0.131,-0.246,1.136) #3=(0.135,-0.131,1.028)
+[INFO] [1781735656.410988353] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.112 y=-0.163 z=1.063 age=0.86s
+[INFO] [1781735656.578047224] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.119,-0.082,0.958) #1=(0.077,-0.173,1.070) #2=(0.133,-0.246,1.136) #3=(0.132,-0.125,1.025)
+[INFO] [1781735657.467550659] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.112 y=-0.163 z=1.063 age=0.89s
+[INFO] [1781735657.602642981] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.121,-0.082,0.958) #1=(0.136,-0.239,1.132) #2=(0.072,-0.171,1.059) #3=(0.135,-0.125,1.025)
+[INFO] [1781735658.496272658] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.112 y=-0.163 z=1.063 age=0.84s
+[INFO] [1781735658.604736164] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.115,-0.082,0.958) #1=(0.132,-0.125,1.025) #2=(0.074,-0.174,1.064) #3=(0.143,-0.239,1.132)
+[INFO] [1781735659.504329115] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.63s
+[INFO] [1781735659.654300724] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.115,-0.082,0.958) #1=(0.160,-0.233,1.119) #2=(0.072,-0.207,1.089) #3=(0.124,-0.131,1.025)
+[INFO] [1781735660.506165483] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.80s
+[INFO] [1781735660.676058206] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.108,-0.082,0.958) #1=(0.068,-0.165,1.049) #2=(0.143,-0.136,1.030) #3=(0.088,-0.239,1.117)
+[INFO] [1781735661.512184199] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.062 age=0.70s
+[INFO] [1781735661.721039022] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.102,-0.082,0.958) #1=(0.065,-0.233,1.121) #2=(0.174,-0.188,1.076) #3=(0.116,-0.131,1.025)
+[INFO] [1781735662.518958297] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame]: invalid (stale 1.06s)
+[INFO] [1781735662.759364167] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.100,-0.082,0.954) #1=(0.146,-0.131,1.025) #2=(0.169,-0.235,1.119) #3=(0.056,-0.181,1.062)
+[INFO] [1781735663.557264513] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.062 age=0.67s
+[INFO] [1781735663.804438447] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.095,-0.086,0.958) #1=(0.170,-0.233,1.118) #2=(0.143,-0.131,1.025) #3=(0.057,-0.188,1.073)
+[INFO] [1781735664.577178781] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.96s
+[INFO] [1781735664.811759765] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.095,-0.086,0.958) #1=(0.169,-0.237,1.119) #2=(0.057,-0.183,1.067) #3=(0.147,-0.131,1.028)
+[INFO] [1781735665.615036712] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.92s
+[INFO] [1781735665.871606597] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.100,-0.086,0.958) #1=(0.146,-0.131,1.025) #2=(0.169,-0.235,1.119) #3=(0.057,-0.182,1.061)
+[INFO] [1781735666.642341589] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.65s
+[INFO] [1781735666.880779558] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.103,-0.086,0.957) #1=(0.169,-0.234,1.119) #2=(0.056,-0.188,1.072) #3=(0.143,-0.131,1.025)
+[INFO] [1781735667.686837194] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.78s
+[INFO] [1781735667.910704508] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.103,-0.086,0.957) #1=(0.169,-0.234,1.119) #2=(0.056,-0.188,1.072) #3=(0.143,-0.131,1.025)
+[INFO] [1781735668.708184713] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.88s
+[INFO] [1781735668.962202735] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.103,-0.086,0.957) #1=(0.169,-0.234,1.119) #2=(0.056,-0.188,1.072) #3=(0.143,-0.131,1.025)
+[INFO] [1781735669.770208902] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.97s
+[INFO] [1781735669.968784207] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735670.782860656] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.83s
+[INFO] [1781735671.014392838] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.100,-0.086,0.958) #1=(0.148,-0.131,1.028) #2=(0.167,-0.239,1.119) #3=(0.059,-0.171,1.053)
+[INFO] [1781735671.827969256] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.85s
+[INFO] [1781735672.073627386] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.100,-0.086,0.958) #1=(0.148,-0.131,1.028) #2=(0.167,-0.239,1.119) #3=(0.059,-0.171,1.053)
+[INFO] [1781735672.855876508] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.87s
+[INFO] [1781735673.081250330] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.100,-0.086,0.958) #1=(0.148,-0.131,1.028) #2=(0.167,-0.239,1.119) #3=(0.059,-0.171,1.053)
+[INFO] [1781735673.885765927] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame]: invalid (stale 1.06s)
+[INFO] [1781735674.113540879] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735674.911921564] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.47s
+[INFO] [1781735675.156985766] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735675.937499130] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.60s
+[INFO] [1781735676.164812149] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735676.975986777] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.66s
+[INFO] [1781735677.216056950] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735678.003379459] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.75s
+[INFO] [1781735678.278443584] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735679.045043789] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.54s
+[INFO] [1781735679.326278045] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735680.100115016] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.70s
+[INFO] [1781735680.348775728] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735681.108257776] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.83s
+[INFO] [1781735681.378928726] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735682.165184177] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.92s
+[INFO] [1781735682.444020193] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735683.188365474] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.68s
+[INFO] [1781735683.468822112] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735684.222780778] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.90s
+[INFO] [1781735684.470918707] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735685.244274773] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.81s
+[INFO] [1781735685.516727109] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735686.245086670] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.70s
+[INFO] [1781735686.554883505] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735687.253570385] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.91s
+[INFO] [1781735687.584340214] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735688.304190658] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.83s
+[INFO] [1781735688.634895973] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735689.361060911] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.82s
+[INFO] [1781735689.665792287] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735690.419415949] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame]: invalid (stale 1.16s)
+[INFO] [1781735690.746421148] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735691.437904677] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.75s
+[INFO] [1781735691.762197504] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735692.484691659] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.64s
+[INFO] [1781735692.783821750] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735693.543486905] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.69s
+[INFO] [1781735693.801491586] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735694.559394481] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.84s
+[INFO] [1781735694.828984658] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735695.626432235] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.61s
+[INFO] [1781735695.832485338] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735696.630479932] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.59s
+[INFO] [1781735696.846499664] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735697.660362512] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.93s
+[INFO] [1781735697.890849420] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735698.668748130] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.66s
+[INFO] [1781735698.947560771] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735699.702496441] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.92s
+[INFO] [1781735699.988512771] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735700.735274871] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.91s
+[INFO] [1781735701.070931258] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735701.812770472] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.98s
+[INFO] [1781735702.144905781] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735702.898824078] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame]: invalid (stale 1.18s)
+[INFO] [1781735703.202508924] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735703.943401459] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame]: invalid (stale 1.12s)
+[INFO] [1781735704.269706904] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735704.994286285] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.50s
+[INFO] [1781735705.276446843] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735706.042554563] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.60s
+[INFO] [1781735706.313511940] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735707.077070736] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.69s
+[INFO] [1781735707.383274244] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735708.128976206] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.57s
+[INFO] [1781735708.429525172] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735709.144509693] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame]: invalid (stale 1.02s)
+[INFO] [1781735709.489045721] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735710.160536792] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame]: invalid (stale 1.07s)
+[INFO] [1781735710.547322997] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735711.190140814] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.75s
+[INFO] [1781735711.556093392] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735712.244131322] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.97s
+[INFO] [1781735712.627529583] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735713.278933036] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.93s
+[INFO] [1781735713.712242320] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735714.316330009] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.82s
+[INFO] [1781735714.760895687] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735715.382659784] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame]: invalid (stale 1.14s)
+[INFO] [1781735715.774589219] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735716.465367780] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.46s
+[INFO] [1781735716.830763430] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735717.489523683] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.54s
+[INFO] [1781735717.880792889] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735718.570336650] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.57s
+[INFO] [1781735718.952557003] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735719.642124476] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.62s
+[INFO] [1781735720.002034492] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735720.663218774] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.60s
+[INFO] [1781735721.098707286] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735721.738216318] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.74s
+[INFO] [1781735722.128980263] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735722.771904396] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame]: invalid (stale 1.01s)
+[INFO] [1781735723.187302274] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735723.829045385] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame]: invalid (stale 1.04s)
+[INFO] [1781735724.231307136] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735724.861352660] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.97s
+[INFO] [1781735725.312472751] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735725.923409515] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.83s
+[INFO] [1781735726.318522409] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735726.965168387] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.93s
+[INFO] [1781735727.419920033] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735727.967803912] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.91s
+[INFO] [1781735728.456454159] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735729.042060386] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame]: invalid (stale 1.04s)
+[INFO] [1781735729.538594764] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735730.046688207] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.64s
+[INFO] [1781735730.552930301] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735731.066189026] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.77s
+[INFO] [1781735731.583102324] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735732.100656874] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.67s
+[INFO] [1781735732.643438181] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735733.161420750] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.69s
+[INFO] [1781735733.690758250] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735734.200596879] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame]: invalid (stale 1.02s)
+[INFO] [1781735734.713075241] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735735.215196255] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.79s
+[INFO] [1781735735.787300737] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735736.288977964] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.91s
+[INFO] [1781735736.790170232] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735737.356718005] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.90s
+[INFO] [1781735737.885813757] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735738.417466385] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.96s
+[INFO] [1781735738.940128582] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735739.457589802] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.93s
+[INFO] [1781735739.977594067] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735740.488668140] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.91s
+[INFO] [1781735740.988894751] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735741.514193118] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame]: invalid (stale 1.02s)
+[INFO] [1781735742.038317254] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735742.567508569] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.47s
+[INFO] [1781735743.066496399] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735743.630675936] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.57s
+[INFO] [1781735744.094538820] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735744.703799987] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.66s
+[INFO] [1781735745.175970605] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735745.772138958] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.76s
+[INFO] [1781735746.236947024] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735746.790062021] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.67s
+[INFO] [1781735747.313660592] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735747.869350991] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.70s
+[INFO] [1781735748.345321208] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735748.922885760] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.75s
+[INFO] [1781735749.450058724] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735749.993857158] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.91s
+[INFO] [1781735750.523877146] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735751.061264913] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.92s
+[INFO] [1781735751.570227376] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735752.091916231] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.51s
+[INFO] [1781735752.609587029] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735753.202140131] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.70s
+[INFO] [1781735753.692027949] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735754.291589097] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.66s
+[INFO] [1781735754.705456236] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735755.360797084] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame]: invalid (stale 1.08s)
+[INFO] [1781735755.733856504] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735756.376499042] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.69s
+[INFO] [1781735756.753492913] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735757.399840914] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.98s
+[INFO] [1781735757.800010344] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735758.458180208] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame]: invalid (stale 1.13s)
+[INFO] [1781735758.827362771] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735759.482025352] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.93s
+[INFO] [1781735759.849165488] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735760.605019978] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.80s
+[INFO] [1781735760.852813806] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735761.616747810] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.57s
+[INFO] [1781735761.909443298] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735762.714447112] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.73s
+[INFO] [1781735762.920904762] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735763.754188713] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.60s
+[INFO] [1781735763.991761418] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735764.787543338] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.64s
+[INFO] [1781735765.019030633] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735765.803631796] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.60s
+[INFO] [1781735766.034599505] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735766.854024790] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.67s
+[INFO] [1781735767.080466241] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735767.887360080] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.79s
+[INFO] [1781735768.107975072] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735768.919463848] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.83s
+[INFO] [1781735769.119858033] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735769.940311573] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.94s
+[INFO] [1781735770.139613628] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735770.967042895] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame]: invalid (stale 1.06s)
+[INFO] [1781735771.176438267] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735771.988695562] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.60s
+[INFO] [1781735772.231134120] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735773.047640970] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.89s
+[INFO] [1781735773.287882792] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735774.133478416] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.70s
+[INFO] [1781735774.369209858] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735775.161193781] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.79s
+[INFO] [1781735775.457092884] [robot_monitor]: Candidates[sim_camera_color_optical_frame] #0=(0.101,-0.084,0.957) #1=(0.146,-0.131,1.025) #2=(0.168,-0.239,1.119) #3=(0.060,-0.176,1.058)
+[INFO] [1781735776.251230887] [robot_monitor]: Prompt: white sorting tray center | Keypoint[sim_camera_color_optical_frame] x=0.111 y=-0.163 z=1.063 age=0.91s
+[INFO] [1781735776.289060031] [rclcpp]: signal_handler(signum=2)

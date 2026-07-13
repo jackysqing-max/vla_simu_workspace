@@ -10,11 +10,14 @@ import urllib.error
 import urllib.request
 
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import String
 
 from pybullet_ros2_sim.task_plan_utils import (
     PLAN_JSON_SCHEMA,
+    SURGICAL_RCM_PLAN_JSON_SCHEMA,
     SUPPORTED_TARGET_PROMPTS,
     infer_plan_from_instruction,
     plan_to_json,
@@ -131,6 +134,7 @@ class LlmTaskPlanner(Node):
         self.declare_parameter("request_timeout_sec", 45.0)
         self.declare_parameter("open_vocabulary_targets", False)
         self.declare_parameter("enable_grasp_actions", False)
+        self.declare_parameter("enable_rcm_actions", False)
         self.declare_parameter("allow_local_fallback", True)
 
         self.instruction_topic = str(self.get_parameter("instruction_topic").value)
@@ -155,12 +159,24 @@ class LlmTaskPlanner(Node):
             self.get_parameter("open_vocabulary_targets").value
         )
         self.enable_grasp_actions = bool(self.get_parameter("enable_grasp_actions").value)
+        self.enable_rcm_actions = bool(
+            self.get_parameter("enable_rcm_actions").value
+        )
         self.allow_local_fallback = bool(
             self.get_parameter("allow_local_fallback").value
         )
         self.latest_scene_registry = {"target_frame": "world", "updated_at_sec": 0.0, "objects": []}
 
-        self.pub_plan = self.create_publisher(String, self.plan_topic, 10)
+        plan_qos = QoSProfile(
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+        self.pub_plan = self.create_publisher(
+            String,
+            self.plan_topic,
+            plan_qos,
+        )
         self.pub_status = self.create_publisher(String, self.status_topic, 10)
         self.sub_instruction = self.create_subscription(
             String,
@@ -233,6 +249,11 @@ class LlmTaskPlanner(Node):
         ]
 
     def _build_responses_payload(self, instruction_text: str) -> dict:
+        plan_schema = (
+            SURGICAL_RCM_PLAN_JSON_SCHEMA
+            if self.enable_rcm_actions
+            else PLAN_JSON_SCHEMA
+        )
         payload = {
             "model": self.model,
             "input": self._messages_for_instruction(instruction_text),
@@ -240,7 +261,7 @@ class LlmTaskPlanner(Node):
                 "format": {
                     "type": "json_schema",
                     "name": "robot_task_plan",
-                    "schema": PLAN_JSON_SCHEMA,
+                    "schema": plan_schema,
                     "strict": True,
                 }
             },
@@ -252,6 +273,11 @@ class LlmTaskPlanner(Node):
         return payload
 
     def _build_chat_completions_payload(self, instruction_text: str) -> dict:
+        plan_schema = (
+            SURGICAL_RCM_PLAN_JSON_SCHEMA
+            if self.enable_rcm_actions
+            else PLAN_JSON_SCHEMA
+        )
         payload = {
             "model": self.model,
             "messages": self._messages_for_instruction(instruction_text),
@@ -259,7 +285,7 @@ class LlmTaskPlanner(Node):
                 "type": "json_schema",
                 "json_schema": {
                     "name": "robot_task_plan",
-                    "schema": PLAN_JSON_SCHEMA,
+                    "schema": plan_schema,
                 },
             },
             "temperature": self.temperature,
@@ -275,6 +301,26 @@ class LlmTaskPlanner(Node):
         self.latest_scene_registry = scene_registry_from_json(msg.data)
 
     def _system_prompt(self) -> str:
+        if self.enable_rcm_actions:
+            return (
+                "You are a safety-constrained laparoscopic robot task planner. "
+                "Convert the user's instruction into exactly four executable "
+                "JSON steps in this strict order: "
+                "1) localize_rcm_port, 2) align_tool_axis, "
+                "3) establish_rcm, 4) execute_rcm_circle. "
+                "Return JSON only, with no markdown or extra prose. "
+                "localize_rcm_port locks the port center and axis before motion. "
+                "align_tool_axis moves to a collinear pre-insertion pose. "
+                "establish_rcm inserts along the locked axis and fixes the port "
+                "center as the RCM point. execute_rcm_circle starts the "
+                "constrained circular trajectory. "
+                "Each raw model step must contain only step_index and action. "
+                "The deterministic safety layer will add prompts, descriptions, "
+                "thresholds, insertion depth, circle radius, and dwell times. "
+                "Never reorder or omit a step. "
+                "The LLM does not output joint angles, torques, poses, or "
+                "unconstrained free-space motions."
+            )
         if self.open_vocabulary_targets:
             if self.enable_grasp_actions:
                 return (
@@ -379,6 +425,7 @@ class LlmTaskPlanner(Node):
             _extract_json_object(plan_text),
             allow_open_vocabulary=self.open_vocabulary_targets,
             allow_grasp_actions=self.enable_grasp_actions,
+            allow_rcm_actions=self.enable_rcm_actions,
         )
 
     def _plan_with_fallback(self, instruction: str) -> tuple[dict, bool]:
@@ -420,6 +467,7 @@ class LlmTaskPlanner(Node):
             instruction,
             allow_open_vocabulary=self.open_vocabulary_targets,
             allow_grasp_actions=self.enable_grasp_actions,
+            allow_rcm_actions=self.enable_rcm_actions,
         )
         if fallback_plan["steps"]:
             self.get_logger().warning(
@@ -458,10 +506,12 @@ def main(args=None):
     node = LlmTaskPlanner()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
-    node.destroy_node()
-    rclpy.shutdown()
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":
