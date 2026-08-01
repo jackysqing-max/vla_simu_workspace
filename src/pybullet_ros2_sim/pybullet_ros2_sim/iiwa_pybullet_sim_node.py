@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Core iiwa execution node backed by a single PyBullet simulation."""
 
+import json
 import math
 import threading
 from pathlib import Path
@@ -15,7 +16,7 @@ from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import CameraInfo, Image, JointState
-from std_msgs.msg import Bool, Float64MultiArray, Header, Int8
+from std_msgs.msg import Bool, Float64MultiArray, Header, Int8, String
 from tf2_ros import TransformBroadcaster
 
 from pybullet_ros2_sim.camera_tf_utils import view_matrix_to_world_optical_tf
@@ -88,6 +89,9 @@ class IiwaPybulletSim(Node):
         self.latest_tip_point_time = 0.0
         self.latest_port_point = None
         self.latest_port_axis = None
+        self.latest_surface_axis = None
+        self.latest_port_candidates = []
+        self.latest_port_candidates_time = 0.0
         self.latest_port_pose_time = 0.0
 
         self.pub_js = self.create_publisher(JointState, "/iiwa7/joint_states", 10)
@@ -178,14 +182,28 @@ class IiwaPybulletSim(Node):
                 PointStamped,
                 self.locked_port_point_topic,
                 self.on_locked_port_point,
-                10,
+                qos_latch,
                 callback_group=self.cb_sub,
             )
             self.sub_port_axis = self.create_subscription(
                 Vector3Stamped,
                 self.locked_port_axis_topic,
                 self.on_locked_port_axis,
-                10,
+                qos_latch,
+                callback_group=self.cb_sub,
+            )
+            self.sub_surface_axis = self.create_subscription(
+                Vector3Stamped,
+                self.locked_surface_axis_topic,
+                self.on_locked_surface_axis,
+                qos_latch,
+                callback_group=self.cb_sub,
+            )
+            self.sub_port_candidates = self.create_subscription(
+                String,
+                self.port_candidates_topic,
+                self.on_port_candidates,
+                qos_latch,
                 callback_group=self.cb_sub,
             )
 
@@ -267,8 +285,8 @@ class IiwaPybulletSim(Node):
             )
         if self.show_port_detection_overlay:
             self.get_logger().info(
-                "[PORT_OVERLAY] enabled: cyan ring=locked port center, "
-                "cyan arrow=locked inward port axis"
+                "[PORT_OVERLAY] enabled: yellow sphere=exact locked port point, "
+                "green spheres=candidate centers, cyan ring/arrow=locked inward port axis"
             )
         if self.enable_rgbd_camera:
             self.get_logger().info(
@@ -383,6 +401,14 @@ class IiwaPybulletSim(Node):
         self.declare_parameter(
             "locked_port_axis_topic",
             "/rcm_virtual_fixtures/locked_port_axis",
+        )
+        self.declare_parameter(
+            "locked_surface_axis_topic",
+            "/vlm_rcm/locked_surface_axis",
+        )
+        self.declare_parameter(
+            "port_candidates_topic",
+            "/vlm_rcm/hole_candidates",
         )
         self.declare_parameter("port_overlay_max_age_sec", 2.0)
         self.declare_parameter("port_overlay_ring_radius_m", 0.010)
@@ -568,6 +594,12 @@ class IiwaPybulletSim(Node):
         )
         self.locked_port_axis_topic = str(
             self.get_parameter("locked_port_axis_topic").value
+        )
+        self.locked_surface_axis_topic = str(
+            self.get_parameter("locked_surface_axis_topic").value
+        )
+        self.port_candidates_topic = str(
+            self.get_parameter("port_candidates_topic").value
         )
         self.port_overlay_max_age_sec = max(
             float(self.get_parameter("port_overlay_max_age_sec").value),
@@ -871,6 +903,49 @@ class IiwaPybulletSim(Node):
                 self.get_clock().now().nanoseconds * 1e-9
             )
 
+    def on_locked_surface_axis(self, msg: Vector3Stamped):
+        axis = [
+            float(msg.vector.x),
+            float(msg.vector.y),
+            float(msg.vector.z),
+        ]
+        with self._lock:
+            self.latest_surface_axis = axis
+            self.latest_port_pose_time = (
+                self.get_clock().now().nanoseconds * 1e-9
+            )
+
+    def on_port_candidates(self, msg: String):
+        try:
+            payload = json.loads(msg.data)
+        except json.JSONDecodeError:
+            return
+        selected_id = payload.get("selected_id")
+        candidates = []
+        for hole in payload.get("holes", []):
+            center = hole.get("center_world", None)
+            if not isinstance(center, list) or len(center) != 3:
+                continue
+            try:
+                candidate = {
+                    "id": int(hole.get("id", -1)),
+                    "center_world": [float(value) for value in center],
+                    "score": float(hole.get("selection_score", 0.0)),
+                    "rank": int(hole.get("selection_rank", 0)),
+                    "selected": (
+                        selected_id is not None
+                        and int(hole.get("id", -1)) == int(selected_id)
+                    ),
+                }
+            except (TypeError, ValueError):
+                continue
+            candidates.append(candidate)
+        with self._lock:
+            self.latest_port_candidates = candidates
+            self.latest_port_candidates_time = (
+                self.get_clock().now().nanoseconds * 1e-9
+            )
+
     def set_mode(self, new_mode: int):
         with self._lock:
             old_mode = self.control_mode
@@ -939,7 +1014,13 @@ class IiwaPybulletSim(Node):
         self.dvrk_lnd_joint_indices = {}
         self.port_ring_line_ids = []
         self.port_axis_line_ids = []
+        self.port_surface_axis_line_ids = []
+        self.port_candidate_label_ids = []
+        self.port_center_marker_body_id = None
+        self.port_candidate_marker_visual_shape_id = None
+        self.port_candidate_marker_body_ids = []
         self.port_label_id = -1
+        self.port_surface_label_id = -1
         self.port_overlay_signature = None
         self.port_overlay_visible = False
 
@@ -1036,6 +1117,29 @@ class IiwaPybulletSim(Node):
                     physicsClientId=self.client,
                 )
 
+        if self.show_port_detection_overlay:
+            port_center_visual = p.createVisualShape(
+                p.GEOM_SPHERE,
+                radius=0.006,
+                rgbaColor=[1.0, 0.86, 0.05, 1.0],
+                specularColor=[0.9, 0.9, 0.9],
+                physicsClientId=self.client,
+            )
+            self.port_candidate_marker_visual_shape_id = p.createVisualShape(
+                p.GEOM_SPHERE,
+                radius=0.0035,
+                rgbaColor=[0.0, 0.95, 0.2, 0.82],
+                specularColor=[0.4, 0.4, 0.4],
+                physicsClientId=self.client,
+            )
+            self.port_center_marker_body_id = p.createMultiBody(
+                baseMass=0.0,
+                baseCollisionShapeIndex=-1,
+                baseVisualShapeIndex=port_center_visual,
+                basePosition=hidden,
+                physicsClientId=self.client,
+            )
+
         if self.show_dvrk_lnd_gripper:
             urdf_path = Path(self.dvrk_lnd_urdf_path).expanduser()
             if not urdf_path.is_file():
@@ -1114,7 +1218,11 @@ class IiwaPybulletSim(Node):
         if not self.port_overlay_visible:
             return
         hidden = [0.0, 0.0, -10.0]
-        for line_id in self.port_ring_line_ids + self.port_axis_line_ids:
+        for line_id in (
+            self.port_ring_line_ids
+            + self.port_axis_line_ids
+            + self.port_surface_axis_line_ids
+        ):
             self._set_debug_line(
                 line_id,
                 hidden,
@@ -1128,16 +1236,99 @@ class IiwaPybulletSim(Node):
             hidden,
             [0.0, 0.9, 1.0],
         )
+        self.port_surface_label_id = self._set_marker_label(
+            self.port_surface_label_id,
+            "",
+            hidden,
+            [1.0, 0.0, 1.0],
+        )
+        self._hide_body(self.port_center_marker_body_id)
+        for body_id in self.port_candidate_marker_body_ids:
+            self._hide_body(body_id)
+        for label_id in self.port_candidate_label_ids:
+            self._set_marker_label(
+                label_id,
+                "",
+                hidden,
+                [0.0, 0.9, 0.2],
+            )
+        self.port_candidate_label_ids = []
         self.port_overlay_signature = None
         self.port_overlay_visible = False
 
-    def _update_port_detection_overlay(self, point, axis):
+    def _ensure_port_candidate_marker_bodies(self, count):
+        if self.port_candidate_marker_visual_shape_id is None:
+            return
+        hidden = [0.0, 0.0, -10.0]
+        while len(self.port_candidate_marker_body_ids) < count:
+            self.port_candidate_marker_body_ids.append(
+                p.createMultiBody(
+                    baseMass=0.0,
+                    baseCollisionShapeIndex=-1,
+                    baseVisualShapeIndex=self.port_candidate_marker_visual_shape_id,
+                    basePosition=hidden,
+                    physicsClientId=self.client,
+                )
+            )
+
+    def _update_port_candidate_score_labels(self, candidates):
+        hidden = [0.0, 0.0, -10.0]
+        self._ensure_port_candidate_marker_bodies(len(candidates or []))
+        new_label_ids = []
+        for index, candidate in enumerate(candidates or []):
+            label_id = (
+                self.port_candidate_label_ids[index]
+                if index < len(self.port_candidate_label_ids)
+                else -1
+            )
+            point = candidate["center_world"]
+            color = [1.0, 0.85, 0.0] if candidate.get("selected", False) else [0.0, 0.95, 0.2]
+            text = f"H{candidate['id']} {candidate['score']:.2f}"
+            if index < len(self.port_candidate_marker_body_ids):
+                self._set_marker_body(self.port_candidate_marker_body_ids[index], point)
+            new_label_ids.append(
+                self._set_marker_label(label_id, text, point, color)
+            )
+        for body_id in self.port_candidate_marker_body_ids[len(candidates or []):]:
+            self._hide_body(body_id)
+        for label_id in self.port_candidate_label_ids[len(new_label_ids):]:
+            self._set_marker_label(
+                label_id,
+                "",
+                hidden,
+                [0.0, 0.0, 0.0],
+            )
+        self.port_candidate_label_ids = new_label_ids
+
+    def _update_port_detection_overlay(
+        self,
+        point,
+        axis,
+        surface_axis=None,
+        candidates=None,
+    ):
         axis_norm = sum(value * value for value in axis) ** 0.5
         if axis_norm < 1e-8:
             self._hide_port_detection_overlay()
             return
         axis = [value / axis_norm for value in axis]
-        signature = tuple(round(value, 5) for value in point + axis)
+        if surface_axis is not None:
+            surface_norm = sum(value * value for value in surface_axis) ** 0.5
+            if surface_norm >= 1e-8:
+                surface_axis = [value / surface_norm for value in surface_axis]
+            else:
+                surface_axis = None
+        signature_values = point + axis
+        if surface_axis is not None:
+            signature_values += surface_axis
+        for candidate in candidates or []:
+            signature_values += [
+                float(candidate["id"]),
+                *candidate["center_world"],
+                float(candidate["score"]),
+                1.0 if candidate.get("selected", False) else 0.0,
+            ]
+        signature = tuple(round(value, 5) for value in signature_values)
         if self.port_overlay_visible and signature == self.port_overlay_signature:
             return
 
@@ -1158,6 +1349,8 @@ class IiwaPybulletSim(Node):
         basis_1 = unit(cross(axis, reference))
         basis_2 = unit(cross(axis, basis_1))
         cyan = [0.0, 0.9, 1.0]
+        magenta = [1.0, 0.0, 1.0]
+        self._set_marker_body(self.port_center_marker_body_id, point)
 
         ring_points = []
         ring_segments = 24
@@ -1228,6 +1421,50 @@ class IiwaPybulletSim(Node):
                 self._set_debug_line(line_id, start, end, cyan, 4.0)
             )
         self.port_axis_line_ids = new_axis_ids
+        if surface_axis is not None:
+            surface_outside = [
+                point[index]
+                - 0.75 * self.port_overlay_axis_outside_m * surface_axis[index]
+                for index in range(3)
+            ]
+            surface_inside = [
+                point[index]
+                + 0.75 * self.port_overlay_axis_inside_m * surface_axis[index]
+                for index in range(3)
+            ]
+            surface_arrow_back = [
+                surface_inside[index] - 0.014 * surface_axis[index]
+                for index in range(3)
+            ]
+            surface_arrow_left = [
+                surface_arrow_back[index] + 0.006 * basis_2[index]
+                for index in range(3)
+            ]
+            surface_arrow_right = [
+                surface_arrow_back[index] - 0.006 * basis_2[index]
+                for index in range(3)
+            ]
+            surface_segments = [
+                (surface_outside, surface_inside),
+                (surface_inside, surface_arrow_left),
+                (surface_inside, surface_arrow_right),
+            ]
+            new_surface_axis_ids = []
+            for index, (start, end) in enumerate(surface_segments):
+                line_id = (
+                    self.port_surface_axis_line_ids[index]
+                    if index < len(self.port_surface_axis_line_ids)
+                    else -1
+                )
+                new_surface_axis_ids.append(
+                    self._set_debug_line(line_id, start, end, magenta, 3.0)
+                )
+            self.port_surface_axis_line_ids = new_surface_axis_ids
+        elif self.port_surface_axis_line_ids:
+            hidden = [0.0, 0.0, -10.0]
+            for line_id in self.port_surface_axis_line_ids:
+                self._set_debug_line(line_id, hidden, hidden, [0.0, 0.0, 0.0], 1.0)
+            self.port_surface_axis_line_ids = []
         label_point = [
             point[index] + 0.018 * basis_2[index]
             for index in range(3)
@@ -1238,6 +1475,26 @@ class IiwaPybulletSim(Node):
             label_point,
             cyan,
         )
+        if surface_axis is not None:
+            surface_label_point = [
+                point[index] - 0.024 * basis_2[index]
+                for index in range(3)
+            ]
+            self.port_surface_label_id = self._set_marker_label(
+                self.port_surface_label_id,
+                "SURFACE AXIS",
+                surface_label_point,
+                magenta,
+            )
+        else:
+            hidden = [0.0, 0.0, -10.0]
+            self.port_surface_label_id = self._set_marker_label(
+                self.port_surface_label_id,
+                "",
+                hidden,
+                magenta,
+            )
+        self._update_port_candidate_score_labels(candidates or [])
         self.port_overlay_signature = signature
         self.port_overlay_visible = True
 
@@ -1357,7 +1614,18 @@ class IiwaPybulletSim(Node):
                     if self.latest_port_axis is None
                     else list(self.latest_port_axis)
                 )
+                surface_axis = (
+                    None
+                    if self.latest_surface_axis is None
+                    else list(self.latest_surface_axis)
+                )
+                port_candidates = list(self.latest_port_candidates)
+                port_candidates_time = self.latest_port_candidates_time
                 port_time = self.latest_port_pose_time
+            candidates_fresh = (
+                self.port_overlay_max_age_sec <= 0.0
+                or now_sec - port_candidates_time <= self.port_overlay_max_age_sec
+            )
             port_pose_fresh = (
                 port_point is not None
                 and port_axis is not None
@@ -1367,7 +1635,12 @@ class IiwaPybulletSim(Node):
                 )
             )
             if port_pose_fresh:
-                self._update_port_detection_overlay(port_point, port_axis)
+                self._update_port_detection_overlay(
+                    port_point,
+                    port_axis,
+                    surface_axis,
+                    port_candidates if candidates_fresh else [],
+                )
             else:
                 self._hide_port_detection_overlay()
 

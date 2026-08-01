@@ -209,14 +209,16 @@ class Sam3MaskNode(Node):
 
                 top_mask = None
                 top_score = 0.0
+                kept_count = 0
                 best_score = float(np.max(scores)) if scores.size > 0 else 0.0
 
                 if scores.size > 0:
                     keep = scores >= self.score_th
                     if keep.sum() > 0:
-                        best_index = int(np.argmax(scores * keep))
-                        top_mask = masks[best_index].astype(np.uint8) * 255
-                        top_score = float(scores[best_index])
+                        kept_count = int(np.count_nonzero(keep))
+                        kept_masks = masks[keep] > 0
+                        top_mask = np.any(kept_masks, axis=0).astype(np.uint8) * 255
+                        top_score = float(np.max(scores[keep]))
 
                 if top_mask is None:
                     top_mask = np.zeros(
@@ -230,7 +232,8 @@ class Sam3MaskNode(Node):
                 else:
                     mask_area = int(np.count_nonzero(top_mask))
                     self._log_status(
-                        f"prompt='{self.prompt}' mask score={top_score:.3f} area={mask_area}"
+                        f"prompt='{self.prompt}' union_masks={kept_count} "
+                        f"top_score={top_score:.3f} area={mask_area}"
                     )
 
                 if (rgb_small.shape[0], rgb_small.shape[1]) != (orig_h, orig_w):

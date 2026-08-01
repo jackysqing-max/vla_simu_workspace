@@ -30,10 +30,11 @@ VLM_RCM_TRACK_MAX_VEL="${VLM_RCM_TRACK_MAX_VEL:-6.0}"
 VLM_RCM_EXPECTED_X_M="${VLM_RCM_EXPECTED_X_M:-0.701726}"
 VLM_RCM_EXPECTED_Y_M="${VLM_RCM_EXPECTED_Y_M:-0.0}"
 VLM_RCM_EXPECTED_Z_M="${VLM_RCM_EXPECTED_Z_M:-0.404701}"
+VLM_RCM_AXIS_MODE="${VLM_RCM_AXIS_MODE:-calibrated}"
 
-PHANTOM_MESH="${PHANTOM_MESH:-$WS/install/rcm_virtual_fixtures/share/rcm_virtual_fixtures/meshes/phantom_centered.stl}"
+PHANTOM_MESH="${PHANTOM_MESH:-$WS/install/rcm_virtual_fixtures/share/rcm_virtual_fixtures/meshes/phantom_multi.STL}"
 if [[ ! -f "$PHANTOM_MESH" ]]; then
-  PHANTOM_MESH="$WS/src/rcm_virtual_fixtures/meshes/phantom_centered.stl"
+  PHANTOM_MESH="$WS/src/rcm_virtual_fixtures/meshes/phantom_multi.STL"
 fi
 DVRK_LND_URDF="${DVRK_LND_URDF:-$WS/install/rcm_virtual_fixtures/share/rcm_virtual_fixtures/urdf/dvrk_lnd_420006_tip.urdf}"
 if [[ ! -f "$DVRK_LND_URDF" ]]; then
@@ -179,6 +180,8 @@ case "${1:-start}" in
        -p show_port_detection_overlay:=true \
        -p locked_port_point_topic:=/vlm_rcm/locked_port_point \
        -p locked_port_axis_topic:=/vlm_rcm/locked_port_axis \
+       -p locked_surface_axis_topic:=/vlm_rcm/locked_surface_axis \
+       -p port_candidates_topic:=/vlm_rcm/hole_candidates \
        -p port_overlay_ring_radius_m:=0.010 \
        -p port_overlay_axis_outside_m:=0.045 \
        -p port_overlay_axis_inside_m:=0.085 \
@@ -194,6 +197,9 @@ case "${1:-start}" in
        -p rcm_phantom_x_m:=0.701726 \
        -p rcm_phantom_y_m:=0.0 \
        -p rcm_phantom_z_m:=0.240701 \
+       -p rcm_phantom_roll_deg:=0.0 \
+       -p rcm_phantom_pitch_deg:=0.0 \
+       -p rcm_phantom_yaw_deg:=0.0 \
        -p enable_rgbd_camera:=true \
        -p rgbd_hz:=$VLM_RCM_RGBD_HZ \
        -p rgbd_width:=640 \
@@ -211,12 +217,12 @@ case "${1:-start}" in
     fi
 
     start_bg_ros vlm_rcm_port_pose \
-      "ros2 run rcm_virtual_fixtures vlm_port_pose_node --ros-args \
+       "ros2 run rcm_virtual_fixtures vlm_port_pose_node --ros-args \
        -p expected_port_world:='[$VLM_RCM_EXPECTED_X_M,$VLM_RCM_EXPECTED_Y_M,$VLM_RCM_EXPECTED_Z_M]' \
-       -p expected_port_max_distance_m:=0.070 \
+       -p expected_port_max_distance_m:=0.0 \
        -p normal_reference:='[0.0,0.0,1.0]' \
        -p plane_max_tilt_deg:=20.0 \
-       -p axis_mode:=calibrated \
+       -p axis_mode:=$VLM_RCM_AXIS_MODE \
        -p calibrated_inward_axis:='[0.335067,0.0,-0.942194]' \
        -p annulus_radius_px:=24 \
        -p hole_search_radius_px:=40 \
@@ -228,6 +234,9 @@ case "${1:-start}" in
        -p stability_window:=5 \
        -p max_center_spread_m:=0.006 \
        -p max_axis_spread_deg:=6.0 \
+       -p default_spatial_reference_frame:=image \
+       -p phantom_left_axis_world:='[0.0,1.0,0.0]' \
+       -p phantom_up_axis_world:='[1.0,0.0,0.0]' \
        -p display_overlay:=$VLM_RCM_DISPLAY_OVERLAY \
        -p display_scale:=$VLM_RCM_DISPLAY_SCALE"
 
@@ -236,13 +245,14 @@ case "${1:-start}" in
     echo
     echo "[OK] SAM3 VLM-RCM port perception demo started."
     echo "     prompt: $SAM3_PROMPT"
-    echo "     PyBullet: cyan ring = locked port center, cyan arrow = inward axis"
+    echo "     PyBullet: yellow sphere = exact locked point; green spheres = candidates; cyan arrow = inward axis"
     echo "     Camera window: green = SAM3 mask, cyan = center/axis"
     echo
     echo "Monitor:"
     echo "  ros2 topic echo /vlm_rcm/status"
     echo "  ros2 topic echo /vlm_rcm/locked_port_point"
     echo "  ros2 topic echo /vlm_rcm/locked_port_axis"
+    echo "  ros2 topic echo /vlm_rcm/locked_surface_axis"
     ;;
   stop)
     source_env >/dev/null 2>&1 || true
@@ -267,8 +277,19 @@ case "${1:-start}" in
     source_env
     ros2 topic pub --once /sam3/prompt std_msgs/msg/String "{data: '$*'}"
     ;;
+  locate)
+    shift || true
+    if [[ $# -eq 0 ]]; then
+      echo "Usage: $0 locate \"定位phantom上左上角的孔\"" >&2
+      exit 2
+    fi
+    source_env
+    python3 "$WS/docs/recording_scripts/vlm_rcm_locate_capture.py" \
+      "$@" \
+      --sam-prompt "$SAM3_PROMPT"
+    ;;
   *)
-    echo "Usage: $0 {start|stop|status|logs|prompt \"text\"}"
+    echo "Usage: $0 {start|stop|status|logs|prompt \"text\"|locate \"text\"}"
     exit 2
     ;;
 esac

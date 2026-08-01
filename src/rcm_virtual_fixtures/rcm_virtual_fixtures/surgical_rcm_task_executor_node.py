@@ -27,6 +27,8 @@ class SurgicalRcmTaskExecutor(Node):
 
         self.declare_parameter("plan_topic", "/llm_task/plan_json")
         self.declare_parameter("prompt_topic", "/sam3/prompt")
+        self.declare_parameter("language_command_topic", "/vlm_rcm/language_command")
+        self.declare_parameter("port_detection_prompt", "circular hole")
         self.declare_parameter("port_ready_topic", "/vlm_rcm/port_ready")
         self.declare_parameter(
             "port_point_topic",
@@ -72,6 +74,12 @@ class SurgicalRcmTaskExecutor(Node):
 
         self.plan_topic = str(self.get_parameter("plan_topic").value)
         self.prompt_topic = str(self.get_parameter("prompt_topic").value)
+        self.language_command_topic = str(
+            self.get_parameter("language_command_topic").value
+        )
+        self.port_detection_prompt = str(
+            self.get_parameter("port_detection_prompt").value
+        ).strip() or "circular hole"
         self.port_ready_topic = str(
             self.get_parameter("port_ready_topic").value
         )
@@ -128,6 +136,11 @@ class SurgicalRcmTaskExecutor(Node):
         self.pub_prompt = self.create_publisher(
             String,
             self.prompt_topic,
+            10,
+        )
+        self.pub_language_command = self.create_publisher(
+            String,
+            self.language_command_topic,
             10,
         )
         self.pub_controller_start = self.create_publisher(
@@ -254,6 +267,22 @@ class SurgicalRcmTaskExecutor(Node):
         msg.data = str(prompt)
         self.pub_prompt.publish(msg)
         self.last_prompt_ns = self._now_ns()
+
+    def _publish_language_command(self, command: str):
+        msg = String()
+        msg.data = str(command)
+        self.pub_language_command.publish(msg)
+
+    def _localize_language_command(self, step: dict) -> str:
+        target = str(step.get("target_prompt", "") or "").strip()
+        description = str(step.get("description", "") or "").strip()
+        command = " ".join(piece for piece in (target, description) if piece).strip()
+        if not command:
+            command = "circular hole"
+        lower = command.lower()
+        if not any(word in lower for word in ("phantom", "仿体", "体模", "模型")):
+            command = f"on phantom {command}"
+        return command
 
     def _publish_status(self, text: str, *, force: bool = False):
         now_ns = self._now_ns()
@@ -402,7 +431,8 @@ class SurgicalRcmTaskExecutor(Node):
         if (
             now_ns - self.last_prompt_ns
         ) * 1e-9 >= self.prompt_republish_sec:
-            self._publish_prompt(step["target_prompt"])
+            self._publish_prompt(self.port_detection_prompt)
+            self._publish_language_command(self._localize_language_command(step))
         localized = (
             self.port_ready
             and self.port_point is not None

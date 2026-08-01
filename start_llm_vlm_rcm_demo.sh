@@ -22,6 +22,7 @@ RCM_TRAJECTORY_RADIUS_M="${RCM_TRAJECTORY_RADIUS_M:-0.020}"
 RCM_TOOL_LENGTH_M="${RCM_TOOL_LENGTH_M:-0.220}"
 RCM_LAMBDA="${RCM_LAMBDA:-0.650}"
 RCM_METRICS_CSV="${RCM_METRICS_CSV:-$LOG_DIR/llm_vlm_rcm_metrics.csv}"
+RCM_VISUAL_PORT_MAX_OFFSET_M="${RCM_VISUAL_PORT_MAX_OFFSET_M:-0.0}"
 
 DEFAULT_TASK="locate the circular laparoscopic port, align the surgical tool with the insertion axis, insert through the port while establishing the RCM constraint, then execute a circular trajectory while keeping the RCM point fixed"
 
@@ -230,7 +231,7 @@ start_execution_runtime() {
      -p visual_port_point_topic:=/vlm_rcm/locked_port_point \
      -p visual_port_axis_topic:=/vlm_rcm/locked_port_axis \
      -p visual_port_ready_topic:=/vlm_rcm/port_ready \
-     -p visual_port_max_offset_m:=0.070 \
+     -p visual_port_max_offset_m:=$RCM_VISUAL_PORT_MAX_OFFSET_M \
      -p visual_port_reference_axis:='[0.335067,0.0,-0.942194]' \
      -p visual_port_max_axis_angle_deg:=12.0 \
      -p preinsert_clearance_m:=$RCM_PREINSERT_CLEARANCE_M \
@@ -350,6 +351,19 @@ case "${1:-start}" in
       echo "[OK] execution runtime started from the retained task plan"
     fi
     ;;
+  locate)
+    shift || true
+    if [[ $# -eq 0 ]]; then
+      echo "Usage: $0 locate \"定位phantom上左上角的孔\"" >&2
+      exit 2
+    fi
+    source_env
+    stop_owned_processes false >/dev/null 2>&1 || true
+    VLM_RCM_SHOW_TOOL=false \
+    VLM_RCM_SHOW_DVRK_LND=false \
+      ./start_vlm_rcm_port_perception_demo.sh start
+    ./start_vlm_rcm_port_perception_demo.sh locate "$@"
+    ;;
   stop)
     source_env >/dev/null 2>&1 || true
     stop_owned_processes
@@ -369,7 +383,7 @@ case "${1:-start}" in
       "$LOG_DIR/vlm_rcm_port_sam3.log"
     ;;
   *)
-    echo "Usage: $0 {start|task [instruction]|stop|status|logs}"
+    echo "Usage: $0 {start|task [instruction]|locate \"text\"|stop|status|logs}"
     exit 2
     ;;
 esac

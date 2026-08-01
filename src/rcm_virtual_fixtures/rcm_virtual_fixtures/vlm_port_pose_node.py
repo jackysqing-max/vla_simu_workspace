@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 from collections import deque
+import json
 import math
+import re
 import threading
 import time
 
@@ -176,10 +178,20 @@ class VlmPortPoseNode(Node):
         self.declare_parameter("min_score", 0.05)
         self.declare_parameter("min_mask_area_px", 40)
         self.declare_parameter("max_mask_area_fraction", 0.35)
+        self.declare_parameter("max_mask_components", 48)
         self.declare_parameter("annulus_radius_px", 18)
         self.declare_parameter("hole_search_radius_px", 40)
         self.declare_parameter("hole_min_depth_m", 0.025)
         self.declare_parameter("hole_min_area_px", 80)
+        self.declare_parameter("hole_min_depth_area_fraction", 0.08)
+        self.declare_parameter("hole_min_component_overlap_fraction", 0.20)
+        self.declare_parameter("hole_max_center_offset_px", 24.0)
+        self.declare_parameter("hole_min_circularity", 0.28)
+        self.declare_parameter("hole_axis_slice_count", 5)
+        self.declare_parameter("hole_axis_min_slices", 3)
+        self.declare_parameter("hole_axis_slice_min_area_px", 12)
+        self.declare_parameter("hole_axis_min_depth_span_m", 0.008)
+        self.declare_parameter("hole_axis_max_rms_m", 0.012)
         self.declare_parameter("max_plane_samples", 2500)
         self.declare_parameter("plane_distance_threshold_m", 0.0035)
         self.declare_parameter("plane_max_tilt_deg", 35.0)
@@ -208,6 +220,10 @@ class VlmPortPoseNode(Node):
             "/vlm_rcm/port_axis_raw",
         )
         self.declare_parameter(
+            "selected_surface_axis_topic",
+            "/vlm_rcm/selected_surface_axis",
+        )
+        self.declare_parameter(
             "locked_port_point_topic",
             "/vlm_rcm/locked_port_point",
         )
@@ -215,9 +231,19 @@ class VlmPortPoseNode(Node):
             "locked_port_axis_topic",
             "/vlm_rcm/locked_port_axis",
         )
+        self.declare_parameter(
+            "locked_surface_axis_topic",
+            "/vlm_rcm/locked_surface_axis",
+        )
         self.declare_parameter("valid_topic", "/vlm_rcm/port_valid")
         self.declare_parameter("ready_topic", "/vlm_rcm/port_ready")
         self.declare_parameter("status_topic", "/vlm_rcm/status")
+        self.declare_parameter("candidate_topic", "/vlm_rcm/hole_candidates")
+        self.declare_parameter("language_command_topic", "/vlm_rcm/language_command")
+        self.declare_parameter("phantom_surface_min_gap_m", 0.035)
+        self.declare_parameter("default_spatial_reference_frame", "image")
+        self.declare_parameter("phantom_left_axis_world", [0.0, 1.0, 0.0])
+        self.declare_parameter("phantom_up_axis_world", [1.0, 0.0, 0.0])
         self.declare_parameter("reset_topic", "/vlm_rcm/reset_lock")
         self.declare_parameter("overlay_topic", "/vlm_rcm/overlay")
         self.declare_parameter("display_overlay", True)
@@ -246,6 +272,10 @@ class VlmPortPoseNode(Node):
         self.max_mask_area_fraction = float(
             self.get_parameter("max_mask_area_fraction").value
         )
+        self.max_mask_components = max(
+            int(self.get_parameter("max_mask_components").value),
+            1,
+        )
         self.annulus_radius_px = max(
             int(self.get_parameter("annulus_radius_px").value),
             2,
@@ -261,6 +291,46 @@ class VlmPortPoseNode(Node):
         self.hole_min_area_px = max(
             int(self.get_parameter("hole_min_area_px").value),
             8,
+        )
+        self.hole_min_depth_area_fraction = max(
+            float(self.get_parameter("hole_min_depth_area_fraction").value),
+            0.0,
+        )
+        self.hole_min_component_overlap_fraction = max(
+            float(
+                self.get_parameter(
+                    "hole_min_component_overlap_fraction"
+                ).value
+            ),
+            0.0,
+        )
+        self.hole_max_center_offset_px = max(
+            float(self.get_parameter("hole_max_center_offset_px").value),
+            0.0,
+        )
+        self.hole_min_circularity = max(
+            float(self.get_parameter("hole_min_circularity").value),
+            0.0,
+        )
+        self.hole_axis_slice_count = max(
+            int(self.get_parameter("hole_axis_slice_count").value),
+            2,
+        )
+        self.hole_axis_min_slices = max(
+            int(self.get_parameter("hole_axis_min_slices").value),
+            2,
+        )
+        self.hole_axis_slice_min_area_px = max(
+            int(self.get_parameter("hole_axis_slice_min_area_px").value),
+            4,
+        )
+        self.hole_axis_min_depth_span_m = max(
+            float(self.get_parameter("hole_axis_min_depth_span_m").value),
+            0.0,
+        )
+        self.hole_axis_max_rms_m = max(
+            float(self.get_parameter("hole_axis_max_rms_m").value),
+            0.001,
         )
         self.max_plane_samples = max(
             int(self.get_parameter("max_plane_samples").value),
@@ -286,7 +356,7 @@ class VlmPortPoseNode(Node):
         self.axis_mode = str(
             self.get_parameter("axis_mode").value
         ).strip().lower()
-        if self.axis_mode not in {"surface_normal", "calibrated"}:
+        if self.axis_mode not in {"surface_normal", "calibrated", "section_centers"}:
             self.get_logger().warning(
                 f"unsupported axis_mode={self.axis_mode!r}; "
                 "using surface_normal"
@@ -340,6 +410,30 @@ class VlmPortPoseNode(Node):
             float(self.get_parameter("axis_inside_m").value),
             0.005,
         )
+        self.language_command_topic = str(
+            self.get_parameter("language_command_topic").value
+        )
+        self.phantom_surface_min_gap_m = max(
+            float(self.get_parameter("phantom_surface_min_gap_m").value),
+            0.001,
+        )
+        self.default_spatial_reference_frame = str(
+            self.get_parameter("default_spatial_reference_frame").value
+        ).strip().lower()
+        if self.default_spatial_reference_frame not in {"image", "phantom"}:
+            self.get_logger().warning(
+                "unsupported default_spatial_reference_frame="
+                f"{self.default_spatial_reference_frame!r}; using 'image'"
+            )
+            self.default_spatial_reference_frame = "image"
+        self.phantom_left_axis_world = normalize(
+            self.get_parameter("phantom_left_axis_world").value,
+            fallback=(0.0, 1.0, 0.0),
+        )
+        self.phantom_up_axis_world = normalize(
+            self.get_parameter("phantom_up_axis_world").value,
+            fallback=(1.0, 0.0, 0.0),
+        )
 
         qos_image = QoSProfile(depth=1)
         qos_image.reliability = ReliabilityPolicy.BEST_EFFORT
@@ -367,6 +461,12 @@ class VlmPortPoseNode(Node):
         self.create_subscription(Float32, self.score_topic, self.on_score, 10)
         self.create_subscription(String, self.prompt_topic, self.on_prompt, 10)
         self.create_subscription(
+            String,
+            self.language_command_topic,
+            self.on_language_command,
+            10,
+        )
+        self.create_subscription(
             Bool,
             str(self.get_parameter("reset_topic").value),
             self.on_reset,
@@ -383,6 +483,11 @@ class VlmPortPoseNode(Node):
             str(self.get_parameter("raw_port_axis_topic").value),
             10,
         )
+        self.pub_selected_surface_axis = self.create_publisher(
+            Vector3Stamped,
+            str(self.get_parameter("selected_surface_axis_topic").value),
+            10,
+        )
         self.pub_locked_point = self.create_publisher(
             PointStamped,
             str(self.get_parameter("locked_port_point_topic").value),
@@ -391,6 +496,11 @@ class VlmPortPoseNode(Node):
         self.pub_locked_axis = self.create_publisher(
             Vector3Stamped,
             str(self.get_parameter("locked_port_axis_topic").value),
+            qos_latched,
+        )
+        self.pub_locked_surface_axis = self.create_publisher(
+            Vector3Stamped,
+            str(self.get_parameter("locked_surface_axis_topic").value),
             qos_latched,
         )
         self.pub_valid = self.create_publisher(
@@ -408,6 +518,11 @@ class VlmPortPoseNode(Node):
             str(self.get_parameter("status_topic").value),
             10,
         )
+        self.pub_candidates = self.create_publisher(
+            String,
+            str(self.get_parameter("candidate_topic").value),
+            qos_latched,
+        )
         self.pub_overlay = self.create_publisher(
             Image,
             str(self.get_parameter("overlay_topic").value),
@@ -424,10 +539,18 @@ class VlmPortPoseNode(Node):
         self.latest_info = None
         self.latest_score = 0.0
         self.current_prompt = ""
+        self.current_language_command = ""
         self.pose_samples = deque(maxlen=self.stability_window)
+        self.surface_axis_samples = deque(maxlen=self.stability_window)
         self.locked_point = None
         self.locked_axis = None
+        self.locked_surface_axis = None
         self.locked_axis_source = ""
+        self.last_candidates = []
+        self.last_selected_candidate_id = None
+        self.last_filter_note = ""
+        self.last_language_target = "none"
+        self.last_language_reference_frame = "none"
         self.last_status_time = 0.0
         self.create_timer(0.5, self.publish_locked_pose)
         self.publish_ready(False)
@@ -469,18 +592,149 @@ class VlmPortPoseNode(Node):
     def on_prompt(self, msg: String):
         with self.lock:
             prompt = str(msg.data or "").strip()
-            if prompt != self.current_prompt and self.locked_point is None:
+            if prompt != self.current_prompt:
                 self.pose_samples.clear()
+                self.surface_axis_samples.clear()
+                self.locked_point = None
+                self.locked_axis = None
+                self.locked_surface_axis = None
+                self.locked_axis_source = ""
+                self.last_candidates = []
+                self.last_selected_candidate_id = None
+                self.last_filter_note = ""
+                self.last_language_target = "none"
+                self.last_language_reference_frame = "none"
+                self.publish_ready(False)
             self.current_prompt = prompt
+
+    def on_language_command(self, msg: String):
+        with self.lock:
+            command = str(msg.data or "").strip()
+            if command:
+                self.pose_samples.clear()
+                self.surface_axis_samples.clear()
+                self.locked_point = None
+                self.locked_axis = None
+                self.locked_surface_axis = None
+                self.locked_axis_source = ""
+                self.last_candidates = []
+                self.last_selected_candidate_id = None
+                self.last_filter_note = ""
+                self.last_language_target = "none"
+                self.last_language_reference_frame = "none"
+                self.publish_ready(False)
+            self.current_language_command = command
+        self.publish_status(f"language command: {command or '<empty>'}")
+
+    def language_requests_phantom_surface(self) -> bool:
+        with self.lock:
+            text = f"{self.current_language_command} {self.current_prompt}".lower()
+        return any(
+            keyword in text
+            for keyword in (
+                "phantom",
+                "仿体",
+                "体模",
+                "模型",
+                "phantom上",
+                "phantom 上",
+            )
+        )
+
+    def language_spatial_reference_frame(self) -> str:
+        with self.lock:
+            text = f"{self.current_language_command} {self.current_prompt}".lower()
+        image_keywords = (
+            "相机",
+            "图像",
+            "画面",
+            "窗口",
+            "屏幕",
+            "视角",
+            "视野",
+            "camera",
+            "image",
+            "view",
+            "screen",
+            "pixel",
+        )
+        phantom_keywords = (
+            "phantom",
+            "仿体",
+            "体模",
+            "模型",
+        )
+        if any(keyword in text for keyword in image_keywords):
+            return "image"
+        if any(keyword in text for keyword in phantom_keywords):
+            return "phantom"
+        return self.default_spatial_reference_frame
+
+    def language_spatial_target(self):
+        with self.lock:
+            text = f"{self.current_language_command} {self.current_prompt}".lower()
+        if not text.strip():
+            return None
+
+        wants_left = any(word in text for word in ("左", "left"))
+        wants_right = any(word in text for word in ("右", "right"))
+        wants_up = (
+            re.search(r"(左上|右上|上方|上侧|上边|上角|上排|靠上|顶部|顶上)", text)
+            is not None
+            or any(word in text for word in ("upper", "top", "above", "up"))
+        )
+        wants_down = (
+            re.search(r"(左下|右下|下方|下侧|下边|下角|下排|靠下|底部|底下)", text)
+            is not None
+            or any(word in text for word in ("lower", "bottom", "below", "down"))
+        )
+        wants_center = any(
+            word in text
+            for word in ("中心", "中央", "中间", "原孔", "center", "middle")
+        )
+        reference_frame = self.language_spatial_reference_frame()
+
+        if wants_center and not (wants_left or wants_right or wants_up or wants_down):
+            return {
+                "kind": "center",
+                "label": "center",
+                "reference_frame": reference_frame,
+            }
+
+        directions = []
+        if wants_left and not wants_right:
+            directions.append("left")
+        elif wants_right and not wants_left:
+            directions.append("right")
+        if wants_up and not wants_down:
+            directions.append("up")
+        elif wants_down and not wants_up:
+            directions.append("down")
+
+        if not directions:
+            return None
+        return {
+            "kind": "direction",
+            "directions": directions,
+            "label": "+".join(directions),
+            "reference_frame": reference_frame,
+        }
 
     def on_reset(self, msg: Bool):
         if not msg.data:
             return
         with self.lock:
             self.pose_samples.clear()
+            self.surface_axis_samples.clear()
             self.locked_point = None
             self.locked_axis = None
+            self.locked_surface_axis = None
             self.locked_axis_source = ""
+            self.last_candidates = []
+            self.last_selected_candidate_id = None
+            self.last_filter_note = ""
+            self.last_language_target = "none"
+            self.last_language_reference_frame = "none"
         self.publish_ready(False)
         self.publish_status("lock reset; waiting for SAM3 port observations")
 
@@ -532,33 +786,103 @@ class VlmPortPoseNode(Node):
                 if self.locked_axis is None
                 else self.locked_axis.copy()
             )
+            surface_axis = (
+                None
+                if self.locked_surface_axis is None
+                else self.locked_surface_axis.copy()
+            )
             axis_source = self.locked_axis_source
+            candidates = list(self.last_candidates)
+            selected_candidate_id = self.last_selected_candidate_id
+            filter_note = self.last_filter_note
+            language_target = self.last_language_target
+            language_reference_frame = self.last_language_reference_frame
         if point is None or axis is None:
             return
         self.publish_point(self.pub_locked_point, point)
         self.publish_axis(self.pub_locked_axis, axis)
+        if surface_axis is not None:
+            self.publish_axis(self.pub_locked_surface_axis, surface_axis)
+        if candidates:
+            self.publish_candidates(
+                candidates,
+                selected_id=selected_candidate_id,
+                filter_note=filter_note,
+                language_target=language_target,
+                language_reference_frame=language_reference_frame,
+            )
         self.publish_ready(True)
+        surface_text = ""
+        if surface_axis is not None:
+            alignment = float(np.clip(np.dot(axis, surface_axis), -1.0, 1.0))
+            angle_deg = math.degrees(math.acos(alignment))
+            surface_text = (
+                f" surface_axis=({surface_axis[0]:.3f},"
+                f"{surface_axis[1]:.3f},{surface_axis[2]:.3f})"
+                f" axis_surface_angle={angle_deg:.1f}deg"
+            )
         self.publish_status(
             "locked=true "
             f"center=({point[0]:.4f},{point[1]:.4f},{point[2]:.4f}) "
             f"axis=({axis[0]:.3f},{axis[1]:.3f},{axis[2]:.3f}) "
-            f"axis_source={axis_source}",
+            f"axis_source={axis_source}"
+            f"{surface_text}",
             valid=True,
         )
 
-    def largest_mask_component(self, mask: np.ndarray):
+    def mask_components(self, mask: np.ndarray, *, sort_by_area: bool = False):
         binary = (mask > 127).astype(np.uint8)
         count, labels, stats, centroids = cv2.connectedComponentsWithStats(
             binary,
             connectivity=8,
         )
         if count <= 1:
+            return []
+
+        image_area = int(mask.shape[0] * mask.shape[1])
+        components = []
+        for index in range(1, count):
+            area = int(stats[index, cv2.CC_STAT_AREA])
+            if area < self.min_mask_area_px:
+                continue
+            if area > self.max_mask_area_fraction * image_area:
+                continue
+            centroid = np.asarray(centroids[index], dtype=np.float64)
+            components.append(
+                {
+                    "id": len(components),
+                    "label": int(index),
+                    "component": (labels == index).astype(np.uint8),
+                    "centroid": centroid,
+                    "area": area,
+                    "bbox": (
+                        int(stats[index, cv2.CC_STAT_LEFT]),
+                        int(stats[index, cv2.CC_STAT_TOP]),
+                        int(stats[index, cv2.CC_STAT_WIDTH]),
+                        int(stats[index, cv2.CC_STAT_HEIGHT]),
+                    ),
+                }
+            )
+
+        if sort_by_area:
+            components.sort(key=lambda item: item["area"], reverse=True)
+        else:
+            components.sort(
+                key=lambda item: (
+                    float(item["centroid"][1]),
+                    float(item["centroid"][0]),
+                )
+            )
+        for new_id, item in enumerate(components):
+            item["id"] = new_id
+        return components[: self.max_mask_components]
+
+    def largest_mask_component(self, mask: np.ndarray):
+        components = self.mask_components(mask, sort_by_area=True)
+        if not components:
             return None
-        index = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
-        area = int(stats[index, cv2.CC_STAT_AREA])
-        component = (labels == index).astype(np.uint8)
-        centroid = np.asarray(centroids[index], dtype=np.float64)
-        return component, centroid, area
+        component = components[0]
+        return component["component"], component["centroid"], component["area"]
 
     def camera_to_world(self, frame_id: str):
         transform = self.tf_buffer.lookup_transform(
@@ -590,6 +914,232 @@ class VlmPortPoseNode(Node):
         )
         return int(round(u)), int(round(v))
 
+    def component_circularity(self, component_mask: np.ndarray) -> float:
+        contours, _hierarchy = cv2.findContours(
+            component_mask.astype(np.uint8),
+            cv2.RETR_EXTERNAL,
+            cv2.CHAIN_APPROX_SIMPLE,
+        )
+        if not contours:
+            return 0.0
+        contour = max(contours, key=cv2.contourArea)
+        area = float(cv2.contourArea(contour))
+        perimeter = float(cv2.arcLength(contour, True))
+        if area <= 1e-6 or perimeter <= 1e-6:
+            return 0.0
+        return float(4.0 * math.pi * area / (perimeter * perimeter))
+
+    def component_aperture_center_uv(
+        self,
+        component_mask: np.ndarray,
+        fallback_uv: np.ndarray,
+    ):
+        contours, _hierarchy = cv2.findContours(
+            component_mask.astype(np.uint8),
+            cv2.RETR_EXTERNAL,
+            cv2.CHAIN_APPROX_SIMPLE,
+        )
+        if not contours:
+            return np.asarray(fallback_uv, dtype=np.float64), "component_centroid"
+
+        contour = max(contours, key=cv2.contourArea)
+        if len(contour) >= 5:
+            try:
+                (cx, cy), (_major, _minor), _angle = cv2.fitEllipse(contour)
+                center = np.asarray([float(cx), float(cy)], dtype=np.float64)
+                if np.all(np.isfinite(center)):
+                    return center, "sam_aperture_ellipse"
+            except cv2.error:
+                pass
+
+        moments = cv2.moments(contour)
+        if abs(float(moments["m00"])) > 1e-6:
+            center = np.asarray(
+                [
+                    float(moments["m10"] / moments["m00"]),
+                    float(moments["m01"] / moments["m00"]),
+                ],
+                dtype=np.float64,
+            )
+            if np.all(np.isfinite(center)):
+                return center, "sam_aperture_moments"
+
+        (cx, cy), _radius = cv2.minEnclosingCircle(contour)
+        center = np.asarray([float(cx), float(cy)], dtype=np.float64)
+        if np.all(np.isfinite(center)):
+            return center, "sam_aperture_enclosing_circle"
+        return np.asarray(fallback_uv, dtype=np.float64), "component_centroid"
+
+    def fit_section_center_axis(
+        self,
+        selected_pixels: np.ndarray,
+        search_depth_m: np.ndarray,
+        search_points_world: np.ndarray,
+        inward_surface_normal: np.ndarray,
+    ):
+        selected_depth = search_depth_m[selected_pixels]
+        selected_points = search_points_world[selected_pixels]
+        if selected_depth.size < self.hole_axis_slice_min_area_px:
+            return None
+
+        depth_low = float(np.percentile(selected_depth, 20.0))
+        depth_high = float(np.percentile(selected_depth, 90.0))
+        if depth_high - depth_low < self.hole_axis_min_depth_span_m:
+            return None
+
+        levels = np.linspace(
+            depth_low,
+            depth_high,
+            self.hole_axis_slice_count,
+            dtype=np.float64,
+        )
+        band = max(
+            (depth_high - depth_low) / max(self.hole_axis_slice_count - 1, 1),
+            0.002,
+        )
+        centers = []
+        for level in levels:
+            in_band = selected_pixels & (np.abs(search_depth_m - level) <= band)
+            if int(np.count_nonzero(in_band)) < self.hole_axis_slice_min_area_px:
+                in_band = selected_pixels & (search_depth_m >= level)
+            if int(np.count_nonzero(in_band)) < self.hole_axis_slice_min_area_px:
+                continue
+            centers.append(np.mean(search_points_world[in_band], axis=0))
+
+        if len(centers) < self.hole_axis_min_slices:
+            return None
+        centers = np.asarray(centers, dtype=np.float64)
+        center_mean = np.mean(centers, axis=0)
+        centered = centers - center_mean
+        _u, _s, vh = np.linalg.svd(centered, full_matrices=False)
+        axis = normalize(vh[0], fallback=inward_surface_normal)
+        if float(np.dot(axis, inward_surface_normal)) < 0.0:
+            axis = -axis
+
+        projections = centered @ axis
+        closest = center_mean + projections[:, None] * axis[None, :]
+        rms = float(
+            np.sqrt(np.mean(np.sum((centers - closest) ** 2, axis=1)))
+        )
+        depth_span = float(np.ptp(projections))
+        if (
+            depth_span < self.hole_axis_min_depth_span_m
+            or rms > self.hole_axis_max_rms_m
+        ):
+            return None
+        alignment = float(
+            np.clip(np.dot(axis, inward_surface_normal), -1.0, 1.0)
+        )
+        return {
+            "axis": axis,
+            "centers": centers,
+            "count": int(centers.shape[0]),
+            "rms": rms,
+            "depth_span": depth_span,
+            "surface_angle_deg": float(math.degrees(math.acos(alignment))),
+        }
+
+    def select_recessed_hole_component(
+        self,
+        *,
+        hole_labels: np.ndarray,
+        hole_stats: np.ndarray,
+        hole_centroids: np.ndarray,
+        component: np.ndarray,
+        centroid_uv: np.ndarray,
+        search_rows: np.ndarray,
+        search_cols: np.ndarray,
+        search_depth_m: np.ndarray,
+        search_points_world: np.ndarray,
+        inward_surface_normal: np.ndarray,
+    ):
+        component_area = max(int(np.count_nonzero(component)), 1)
+        best = None
+        rejection_notes = []
+        for index in range(1, int(hole_stats.shape[0])):
+            hole_area = int(hole_stats[index, cv2.CC_STAT_AREA])
+            if hole_area < self.hole_min_area_px:
+                rejection_notes.append(f"Hdepth{index}:area={hole_area}")
+                continue
+            hole_mask = hole_labels == index
+            centroid = np.asarray(hole_centroids[index], dtype=np.float64)
+            center_offset_px = float(np.linalg.norm(centroid - centroid_uv))
+            if (
+                self.hole_max_center_offset_px > 0.0
+                and center_offset_px > self.hole_max_center_offset_px
+            ):
+                rejection_notes.append(
+                    f"Hdepth{index}:offset={center_offset_px:.1f}px"
+                )
+                continue
+            overlap_px = int(np.count_nonzero(hole_mask & (component > 0)))
+            overlap_fraction = overlap_px / max(hole_area, 1)
+            if overlap_fraction < self.hole_min_component_overlap_fraction:
+                rejection_notes.append(
+                    f"Hdepth{index}:overlap={overlap_fraction:.2f}"
+                )
+                continue
+            area_fraction = hole_area / component_area
+            if area_fraction < self.hole_min_depth_area_fraction:
+                rejection_notes.append(
+                    f"Hdepth{index}:area_frac={area_fraction:.2f}"
+                )
+                continue
+            circularity = self.component_circularity(hole_mask.astype(np.uint8))
+            if circularity < self.hole_min_circularity:
+                rejection_notes.append(
+                    f"Hdepth{index}:circ={circularity:.2f}"
+                )
+                continue
+
+            selected_pixels = hole_mask[search_rows, search_cols]
+            selected_depth = search_depth_m[selected_pixels]
+            if selected_depth.size < self.hole_min_area_px:
+                rejection_notes.append(
+                    f"Hdepth{index}:valid_depth={selected_depth.size}"
+                )
+                continue
+            median_depth = float(np.median(selected_depth))
+            p90_depth = float(np.percentile(selected_depth, 90.0))
+            section_fit = self.fit_section_center_axis(
+                selected_pixels,
+                search_depth_m,
+                search_points_world,
+                inward_surface_normal,
+            )
+            score = (
+                float(hole_area)
+                + 120.0 * overlap_fraction
+                + 80.0 * circularity
+                - 2.0 * center_offset_px
+            )
+            if best is None or score > best["score"]:
+                best = {
+                    "index": int(index),
+                    "mask": hole_mask,
+                    "area": hole_area,
+                    "centroid_uv": centroid,
+                    "offset_px": center_offset_px,
+                    "overlap_fraction": overlap_fraction,
+                    "area_fraction": area_fraction,
+                    "circularity": circularity,
+                    "median_depth_m": median_depth,
+                    "p90_depth_m": p90_depth,
+                    "section_fit": section_fit,
+                    "score": score,
+                }
+
+        if best is None:
+            raise ValueError(
+                "no recessed aperture passed geometry checks"
+                + (
+                    ": " + "; ".join(rejection_notes[:4])
+                    if rejection_notes
+                    else ""
+                )
+            )
+        return best
+
     def publish_overlay(
         self,
         mask: np.ndarray,
@@ -597,6 +1147,9 @@ class VlmPortPoseNode(Node):
         *,
         point=None,
         axis=None,
+        surface_axis=None,
+        candidates=None,
+        selected_candidate_id=None,
         status: str,
         locked: bool,
     ):
@@ -619,9 +1172,13 @@ class VlmPortPoseNode(Node):
                 interpolation=cv2.INTER_LINEAR,
             )
 
-        component_result = self.largest_mask_component(mask)
-        if component_result is not None:
-            component, centroid_uv, _area = component_result
+        candidate_by_id = {}
+        if candidates is not None:
+            candidate_by_id = {int(candidate["id"]): candidate for candidate in candidates}
+        for component_info in self.mask_components(mask):
+            component = component_info["component"]
+            component_id = int(component_info["id"])
+            centroid_uv = component_info["centroid"]
             tint = np.zeros_like(color)
             tint[:, :, 1] = 255
             selection = component.astype(bool)
@@ -632,6 +1189,17 @@ class VlmPortPoseNode(Node):
                 0.55,
                 0.0,
             )
+            contours, _hierarchy = cv2.findContours(
+                component,
+                cv2.RETR_EXTERNAL,
+                cv2.CHAIN_APPROX_SIMPLE,
+            )
+            outline_color = (
+                (255, 255, 0)
+                if component_id == selected_candidate_id
+                else (0, 255, 0)
+            )
+            cv2.drawContours(color, contours, -1, outline_color, 1)
             center_px = (
                 int(round(float(centroid_uv[0]))),
                 int(round(float(centroid_uv[1]))),
@@ -644,7 +1212,27 @@ class VlmPortPoseNode(Node):
                 markerSize=14,
                 thickness=1,
             )
-            cv2.circle(color, center_px, 7, (0, 255, 0), 1)
+            cv2.circle(color, center_px, 7, outline_color, 1)
+            label = f"{component_id}"
+            if component_id in candidate_by_id:
+                candidate_score = candidate_by_id[component_id]["diagnostics"].get(
+                    "selection_score",
+                    None,
+                )
+                if candidate_score is None:
+                    label = f"H{component_id}"
+                else:
+                    label = f"H{component_id} {float(candidate_score):.2f}"
+            cv2.putText(
+                color,
+                label,
+                (center_px[0] + 8, center_px[1] - 8),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.48,
+                outline_color,
+                1,
+                cv2.LINE_AA,
+            )
 
         if point is not None and axis is not None and info is not None:
             outside = point - self.axis_outside_m * axis
@@ -672,6 +1260,25 @@ class VlmPortPoseNode(Node):
                 )
                 cv2.circle(color, point_px, 10, (255, 255, 0), 2)
 
+        if point is not None and surface_axis is not None and info is not None:
+            surface_axis = normalize(surface_axis, fallback=(0.0, 0.0, -1.0))
+            outside = point - 0.75 * self.axis_outside_m * surface_axis
+            inside = point + 0.75 * self.axis_inside_m * surface_axis
+            outside_px = self.project_world_point(outside, info)
+            inside_px = self.project_world_point(inside, info)
+            point_px = self.project_world_point(point, info)
+            if outside_px is not None and inside_px is not None:
+                cv2.arrowedLine(
+                    color,
+                    outside_px,
+                    inside_px,
+                    (255, 0, 255),
+                    2,
+                    tipLength=0.20,
+                )
+            if point_px is not None:
+                cv2.circle(color, point_px, 14, (255, 0, 255), 1)
+
         panel_height = 78
         cv2.rectangle(
             color,
@@ -690,6 +1297,16 @@ class VlmPortPoseNode(Node):
             0.65,
             state_color,
             2,
+            cv2.LINE_AA,
+        )
+        cv2.putText(
+            color,
+            "cyan=final axis  magenta=surface equivalent axis",
+            (300, 25),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.43,
+            (230, 230, 230),
+            1,
             cv2.LINE_AA,
         )
         cv2.putText(
@@ -732,17 +1349,15 @@ class VlmPortPoseNode(Node):
             cv2.imshow(self.display_window_name, display)
             cv2.waitKey(1)
 
-    def estimate_pose(self, mask: np.ndarray, depth: np.ndarray, info: CameraInfo):
-        component_result = self.largest_mask_component(mask)
-        if component_result is None:
-            raise ValueError("SAM3 mask has no connected port component")
-        component, centroid_uv, area = component_result
-        image_area = int(mask.shape[0] * mask.shape[1])
-        if area < self.min_mask_area_px:
-            raise ValueError(f"port mask too small: {area}px")
-        if area > self.max_mask_area_fraction * image_area:
-            raise ValueError(f"port mask too large: {area}px")
-
+    def estimate_component_pose(
+        self,
+        component: np.ndarray,
+        centroid_uv: np.ndarray,
+        area: int,
+        mask_shape,
+        depth: np.ndarray,
+        info: CameraInfo,
+    ):
         kernel_size = 2 * self.annulus_radius_px + 1
         kernel = cv2.getStructuringElement(
             cv2.MORPH_ELLIPSE,
@@ -797,7 +1412,7 @@ class VlmPortPoseNode(Node):
         )
         center_col = float(centroid_uv[0])
         center_row = float(centroid_uv[1])
-        grid_rows, grid_cols = np.ogrid[: mask.shape[0], : mask.shape[1]]
+        grid_rows, grid_cols = np.ogrid[: mask_shape[0], : mask_shape[1]]
         search_roi = (
             (grid_cols - center_col) ** 2
             + (grid_rows - center_row) ** 2
@@ -820,11 +1435,12 @@ class VlmPortPoseNode(Node):
         hole_points_world = (
             camera_to_world[:3, :3] @ hole_points_camera.T
         ).T + camera_to_world[:3, 3]
-        behind_surface = (
+        search_depth_m = (
             (hole_points_world - plane["centroid"])
             @ inward_surface_normal
-        ) >= self.hole_min_depth_m
-        depth_hole_mask = np.zeros(mask.shape, dtype=np.uint8)
+        )
+        behind_surface = search_depth_m >= self.hole_min_depth_m
+        depth_hole_mask = np.zeros(mask_shape, dtype=np.uint8)
         depth_hole_mask[
             hole_rows[behind_surface],
             hole_cols[behind_surface],
@@ -840,21 +1456,28 @@ class VlmPortPoseNode(Node):
         )
         if hole_count <= 1:
             raise ValueError("no recessed aperture found inside SAM3 ROI")
-        hole_index = 1 + int(
-            np.argmax(hole_stats[1:, cv2.CC_STAT_AREA])
+        recessed_hole = self.select_recessed_hole_component(
+            hole_labels=hole_labels,
+            hole_stats=hole_stats,
+            hole_centroids=hole_centroids,
+            component=component,
+            centroid_uv=centroid_uv,
+            search_rows=hole_rows,
+            search_cols=hole_cols,
+            search_depth_m=search_depth_m,
+            search_points_world=hole_points_world,
+            inward_surface_normal=inward_surface_normal,
         )
-        hole_area = int(hole_stats[hole_index, cv2.CC_STAT_AREA])
-        if hole_area < self.hole_min_area_px:
-            raise ValueError(
-                f"recessed aperture too small: {hole_area}px"
-            )
-        geometric_centroid_uv = np.asarray(
-            hole_centroids[hole_index],
-            dtype=np.float64,
+        hole_area = int(recessed_hole["area"])
+        geometric_centroid_uv = np.asarray(recessed_hole["centroid_uv"])
+        section_fit = recessed_hole["section_fit"]
+        aperture_center_uv, aperture_center_source = self.component_aperture_center_uv(
+            component,
+            centroid_uv,
         )
 
-        u = float(geometric_centroid_uv[0])
-        v = float(geometric_centroid_uv[1])
+        u = float(aperture_center_uv[0])
+        v = float(aperture_center_uv[1])
         ray_camera = normalize(
             [(u - cx) / fx, (v - cy) / fy, 1.0],
             fallback=(0.0, 0.0, 1.0),
@@ -876,42 +1499,557 @@ class VlmPortPoseNode(Node):
         )
         if distance <= 0.0:
             raise ValueError("port plane intersection is behind camera")
-        center_world = camera_origin + distance * ray_world
+        aperture_center_world = camera_origin + distance * ray_world
+        center_world = aperture_center_world
+
+        section_surface_center_world = None
+        if section_fit is not None:
+            section_axis = section_fit["axis"]
+            section_origin = np.mean(section_fit["centers"], axis=0)
+            denominator_line = float(np.dot(plane["normal"], section_axis))
+            if abs(denominator_line) > 1e-5:
+                section_distance = float(
+                    np.dot(
+                        plane["normal"],
+                        plane["centroid"] - section_origin,
+                    )
+                    / denominator_line
+                )
+                section_surface_center_world = (
+                    section_origin + section_distance * section_axis
+                )
 
         expected_distance = float(
             np.linalg.norm(center_world - self.expected_port_world)
         )
-        if (
-            self.expected_port_max_distance_m > 0.0
-            and expected_distance > self.expected_port_max_distance_m
-        ):
-            raise ValueError(
-                "port estimate outside safety gate: "
-                f"{expected_distance:.3f}m"
-            )
-        if self.axis_mode == "calibrated":
+        section_axis = None if section_fit is None else section_fit["axis"]
+        if self.axis_mode == "section_centers" and section_axis is not None:
+            inward_axis = section_axis.copy()
+            axis_source = "rgbd_section_centers"
+        elif self.axis_mode == "calibrated":
             inward_axis = self.calibrated_inward_axis.copy()
             axis_source = "calibrated_port_geometry"
         else:
             inward_axis = inward_surface_normal
             axis_source = "rgbd_surface_normal"
+        axis_surface_alignment = float(
+            np.clip(np.dot(inward_axis, inward_surface_normal), -1.0, 1.0)
+        )
+        axis_surface_angle_deg = float(
+            math.degrees(math.acos(axis_surface_alignment))
+        )
         return center_world, inward_axis, {
             "area": area,
             "hole_area": hole_area,
             "plane_count": plane["count"],
             "plane_rms": plane["rms"],
+            "plane_centroid": plane["centroid"],
+            "plane_normal": plane["normal"],
+            "surface_equivalent_axis": inward_surface_normal,
+            "surface_axis_source": "rgbd_fitted_surface_plane",
+            "section_center_axis": section_axis,
+            "section_center_axis_source": (
+                "rgbd_depth_section_centers"
+                if section_axis is not None
+                else "unavailable"
+            ),
+            "section_center_count": (
+                0 if section_fit is None else int(section_fit["count"])
+            ),
+            "section_center_rms_m": (
+                float("nan") if section_fit is None else float(section_fit["rms"])
+            ),
+            "section_center_depth_span_m": (
+                0.0 if section_fit is None else float(section_fit["depth_span"])
+            ),
+            "section_surface_angle_deg": (
+                float("nan")
+                if section_fit is None
+                else float(section_fit["surface_angle_deg"])
+            ),
+            "depth_hole_center_offset_px": recessed_hole["offset_px"],
+            "depth_hole_overlap_fraction": recessed_hole["overlap_fraction"],
+            "depth_hole_area_fraction": recessed_hole["area_fraction"],
+            "depth_hole_circularity": recessed_hole["circularity"],
+            "depth_hole_median_depth_m": recessed_hole["median_depth_m"],
+            "depth_hole_p90_depth_m": recessed_hole["p90_depth_m"],
+            "axis_surface_angle_deg": axis_surface_angle_deg,
             "expected_distance": expected_distance,
             "sam_centroid_uv": centroid_uv,
             "geometric_centroid_uv": geometric_centroid_uv,
+            "aperture_center_uv": aperture_center_uv,
+            "aperture_center_source": aperture_center_source,
+            "aperture_center_world": aperture_center_world,
+            "section_surface_center_world": section_surface_center_world,
+            "depth_centroid_to_aperture_offset_px": float(
+                np.linalg.norm(geometric_centroid_uv - aperture_center_uv)
+            ),
             "axis_source": axis_source,
         }
 
+    def estimate_pose_candidates(
+        self,
+        mask: np.ndarray,
+        depth: np.ndarray,
+        info: CameraInfo,
+    ):
+        components = self.mask_components(mask)
+        if not components:
+            raise ValueError("SAM3 mask has no connected port components")
+
+        candidates = []
+        rejected = 0
+        for component_info in components:
+            try:
+                point, axis, diagnostics = self.estimate_component_pose(
+                    component_info["component"],
+                    component_info["centroid"],
+                    component_info["area"],
+                    mask.shape,
+                    depth,
+                    info,
+                )
+            except Exception:
+                rejected += 1
+                continue
+            diagnostics["component_id"] = int(component_info["id"])
+            diagnostics["bbox"] = component_info["bbox"]
+            candidates.append(
+                {
+                    "id": int(component_info["id"]),
+                    "point": point,
+                    "axis": axis,
+                    "centroid_uv": component_info["centroid"],
+                    "area": int(component_info["area"]),
+                    "diagnostics": diagnostics,
+                }
+            )
+
+        if not candidates:
+            raise ValueError(
+                "no valid recessed aperture candidates found "
+                f"from {len(components)} mask components"
+            )
+        return candidates, rejected
+
+    def filter_candidates_to_phantom_surface(self, candidates):
+        if len(candidates) < 2:
+            return candidates, "phantom_surface_filter=single_candidate"
+
+        surface_z = np.asarray(
+            [
+                float(candidate["diagnostics"]["plane_centroid"][2])
+                for candidate in candidates
+            ],
+            dtype=np.float64,
+        )
+        order = np.argsort(surface_z)
+        sorted_z = surface_z[order]
+        gaps = np.diff(sorted_z)
+        if gaps.size == 0:
+            return candidates, "phantom_surface_filter=single_surface"
+
+        split_gap_index = int(np.argmax(gaps))
+        max_gap = float(gaps[split_gap_index])
+        if max_gap < self.phantom_surface_min_gap_m:
+            return (
+                candidates,
+                "phantom_surface_filter=no_separate_surface "
+                f"gap={max_gap:.3f}m",
+            )
+
+        split = split_gap_index + 1
+        keep_indices = set(int(index) for index in order[split:])
+        filtered = [
+            candidate
+            for index, candidate in enumerate(candidates)
+            if index in keep_indices
+        ]
+        if not filtered:
+            return candidates, "phantom_surface_filter=empty_after_split"
+
+        return (
+            filtered,
+            "phantom_surface_filter=highest_surface "
+            f"raw={len(candidates)} kept={len(filtered)} "
+            f"z_low={float(sorted_z[0]):.3f}m "
+            f"z_high={float(sorted_z[-1]):.3f}m "
+            f"gap={max_gap:.3f}m",
+        )
+
+    def annotate_selection_scores(
+        self,
+        candidates,
+        score_records,
+        *,
+        source: str,
+        language_target: str = "none",
+        language_reference_frame: str = "none",
+    ):
+        if not score_records:
+            return
+        raw_scores = np.asarray(
+            [float(score) for _candidate, score in score_records],
+            dtype=np.float64,
+        )
+        min_score = float(np.min(raw_scores))
+        max_score = float(np.max(raw_scores))
+        denominator = max(max_score - min_score, 1e-9)
+        normalized_by_id = {
+            int(candidate["id"]): (
+                1.0
+                if len(score_records) == 1
+                else (float(score) - min_score) / denominator
+            )
+            for candidate, score in score_records
+        }
+        raw_by_id = {
+            int(candidate["id"]): float(score)
+            for candidate, score in score_records
+        }
+        ranked_ids = [
+            int(candidate["id"])
+            for candidate, _score in sorted(
+                score_records,
+                key=lambda item: float(item[1]),
+                reverse=True,
+            )
+        ]
+        rank_by_id = {
+            candidate_id: rank
+            for rank, candidate_id in enumerate(ranked_ids, start=1)
+        }
+        for candidate in candidates:
+            candidate_id = int(candidate["id"])
+            diagnostics = candidate["diagnostics"]
+            if candidate_id not in raw_by_id:
+                diagnostics["selection_score"] = 0.0
+                diagnostics["selection_score_raw"] = -float("inf")
+                diagnostics["selection_rank"] = 0
+                diagnostics["selection_score_source"] = "outside_selection_gate"
+                continue
+            diagnostics["selection_score"] = float(normalized_by_id[candidate_id])
+            diagnostics["selection_score_raw"] = float(raw_by_id[candidate_id])
+            diagnostics["selection_rank"] = int(rank_by_id[candidate_id])
+            diagnostics["selection_score_source"] = str(source)
+            diagnostics["language_target"] = str(language_target)
+            diagnostics["language_reference_frame"] = str(language_reference_frame)
+
+    def select_pose_candidate(self, candidates):
+        spatial_target = self.language_spatial_target()
+        if self.expected_port_max_distance_m > 0.0:
+            candidates = [
+                candidate
+                for candidate in candidates
+                if candidate["diagnostics"]["expected_distance"]
+                <= self.expected_port_max_distance_m
+            ]
+            if not candidates:
+                raise ValueError(
+                    "no candidate inside safety gate after language filtering"
+                )
+
+        if spatial_target is not None:
+            reference_frame = spatial_target.get("reference_frame", "image")
+            if reference_frame == "phantom":
+                coords = np.asarray(
+                    [
+                        [
+                            float(
+                                np.dot(
+                                    candidate["point"],
+                                    self.phantom_left_axis_world,
+                                )
+                            ),
+                            float(
+                                np.dot(
+                                    candidate["point"],
+                                    self.phantom_up_axis_world,
+                                )
+                            ),
+                        ]
+                        for candidate in candidates
+                    ],
+                    dtype=np.float64,
+                )
+                direction_signs = {
+                    "left": (1.0, 0),
+                    "right": (-1.0, 0),
+                    "up": (1.0, 1),
+                    "down": (-1.0, 1),
+                }
+            else:
+                coords = np.asarray(
+                    [candidate["centroid_uv"] for candidate in candidates],
+                    dtype=np.float64,
+                )
+                direction_signs = {
+                    "left": (-1.0, 0),
+                    "right": (1.0, 0),
+                    "up": (-1.0, 1),
+                    "down": (1.0, 1),
+                }
+            center = np.mean(coords, axis=0)
+            span = np.ptp(coords, axis=0)
+            span = np.maximum(span, 1e-6)
+
+            best_candidate = None
+            best_score = -float("inf")
+            score_records = []
+            for index, candidate in enumerate(candidates):
+                rel = (coords[index] - center) / span
+                if spatial_target["kind"] == "center":
+                    score = -float(np.linalg.norm(rel))
+                else:
+                    score = 0.0
+                    for direction in spatial_target["directions"]:
+                        if direction not in direction_signs:
+                            continue
+                        sign, axis_index = direction_signs[direction]
+                        score += sign * float(rel[axis_index])
+                    score += 0.001 * float(candidate["diagnostics"]["hole_area"])
+                score_records.append((candidate, score))
+                if score > best_score:
+                    best_score = score
+                    best_candidate = candidate
+
+            if best_candidate is not None:
+                self.annotate_selection_scores(
+                    candidates,
+                    score_records,
+                    source="language_spatial",
+                    language_target=spatial_target["label"],
+                    language_reference_frame=reference_frame,
+                )
+                best_candidate["diagnostics"]["language_score"] = best_score
+                return best_candidate
+
+        score_records = [
+            (
+                candidate,
+                float(candidate["diagnostics"]["hole_area"]),
+            )
+            for candidate in candidates
+        ]
+        self.annotate_selection_scores(
+            candidates,
+            score_records,
+            source="hole_area_fallback",
+        )
+        return max(
+            candidates,
+            key=lambda item: item["diagnostics"]["selection_score_raw"],
+        )
+
+    def publish_candidates(
+        self,
+        candidates,
+        *,
+        raw_count=None,
+        filter_note="",
+        selected_id=None,
+        language_target="none",
+        language_reference_frame="none",
+    ):
+        payload = {
+            "frame_id": self.target_frame,
+            "stamp_sec": self.get_clock().now().nanoseconds * 1e-9,
+            "raw_count": len(candidates) if raw_count is None else int(raw_count),
+            "count": len(candidates),
+            "filter": filter_note,
+            "selected_id": None if selected_id is None else int(selected_id),
+            "language_target": str(language_target),
+            "language_reference_frame": str(language_reference_frame),
+            "holes": [],
+        }
+        for candidate in candidates:
+            diagnostics = candidate["diagnostics"]
+            plane_centroid = diagnostics["plane_centroid"]
+            plane_normal = diagnostics["plane_normal"]
+            surface_axis = diagnostics.get(
+                "surface_equivalent_axis",
+                -plane_normal,
+            )
+            section_axis = diagnostics.get("section_center_axis", None)
+            section_surface_center = diagnostics.get(
+                "section_surface_center_world",
+                None,
+            )
+            selection_score_raw = diagnostics.get("selection_score_raw", None)
+            if selection_score_raw is not None:
+                selection_score_raw = float(selection_score_raw)
+                if not math.isfinite(selection_score_raw):
+                    selection_score_raw = None
+            def finite_or_none(value):
+                try:
+                    value = float(value)
+                except Exception:
+                    return None
+                return value if math.isfinite(value) else None
+
+            payload["holes"].append(
+                {
+                    "id": int(candidate["id"]),
+                    "center_px": [
+                        float(candidate["centroid_uv"][0]),
+                        float(candidate["centroid_uv"][1]),
+                    ],
+                    "geometric_center_px": [
+                        float(diagnostics["geometric_centroid_uv"][0]),
+                        float(diagnostics["geometric_centroid_uv"][1]),
+                    ],
+                    "aperture_center_px": [
+                        float(diagnostics["aperture_center_uv"][0]),
+                        float(diagnostics["aperture_center_uv"][1]),
+                    ],
+                    "aperture_center_source": str(
+                        diagnostics.get(
+                            "aperture_center_source",
+                            "unknown",
+                        )
+                    ),
+                    "center_world": [
+                        float(candidate["point"][0]),
+                        float(candidate["point"][1]),
+                        float(candidate["point"][2]),
+                    ],
+                    "aperture_center_world": [
+                        float(diagnostics["aperture_center_world"][0]),
+                        float(diagnostics["aperture_center_world"][1]),
+                        float(diagnostics["aperture_center_world"][2]),
+                    ],
+                    "section_surface_center_world": (
+                        None
+                        if section_surface_center is None
+                        else [
+                            float(section_surface_center[0]),
+                            float(section_surface_center[1]),
+                            float(section_surface_center[2]),
+                        ]
+                    ),
+                    "axis": [
+                        float(candidate["axis"][0]),
+                        float(candidate["axis"][1]),
+                        float(candidate["axis"][2]),
+                    ],
+                    "support_center_world": [
+                        float(plane_centroid[0]),
+                        float(plane_centroid[1]),
+                        float(plane_centroid[2]),
+                    ],
+                    "support_normal": [
+                        float(plane_normal[0]),
+                        float(plane_normal[1]),
+                        float(plane_normal[2]),
+                    ],
+                    "surface_equivalent_axis": [
+                        float(surface_axis[0]),
+                        float(surface_axis[1]),
+                        float(surface_axis[2]),
+                    ],
+                    "section_center_axis": (
+                        None
+                        if section_axis is None
+                        else [
+                            float(section_axis[0]),
+                            float(section_axis[1]),
+                            float(section_axis[2]),
+                        ]
+                    ),
+                    "section_center_axis_source": str(
+                        diagnostics.get(
+                            "section_center_axis_source",
+                            "unavailable",
+                        )
+                    ),
+                    "section_center_count": int(
+                        diagnostics.get("section_center_count", 0)
+                    ),
+                    "section_center_rms_m": finite_or_none(
+                        diagnostics.get("section_center_rms_m", None)
+                    ),
+                    "section_center_depth_span_m": finite_or_none(
+                        diagnostics.get("section_center_depth_span_m", None)
+                    ),
+                    "section_surface_angle_deg": finite_or_none(
+                        diagnostics.get("section_surface_angle_deg", None)
+                    ),
+                    "surface_axis_source": str(
+                        diagnostics.get(
+                            "surface_axis_source",
+                            "rgbd_fitted_surface_plane",
+                        )
+                    ),
+                    "axis_surface_angle_deg": float(
+                        diagnostics.get("axis_surface_angle_deg", 0.0)
+                    ),
+                    "support_z_m": float(plane_centroid[2]),
+                    "area_px": int(candidate["area"]),
+                    "hole_area_px": int(diagnostics["hole_area"]),
+                    "depth_hole_center_offset_px": float(
+                        diagnostics.get("depth_hole_center_offset_px", 0.0)
+                    ),
+                    "depth_hole_overlap_fraction": float(
+                        diagnostics.get("depth_hole_overlap_fraction", 0.0)
+                    ),
+                    "depth_hole_area_fraction": float(
+                        diagnostics.get("depth_hole_area_fraction", 0.0)
+                    ),
+                    "depth_hole_circularity": float(
+                        diagnostics.get("depth_hole_circularity", 0.0)
+                    ),
+                    "depth_hole_median_depth_m": float(
+                        diagnostics.get("depth_hole_median_depth_m", 0.0)
+                    ),
+                    "depth_hole_p90_depth_m": float(
+                        diagnostics.get("depth_hole_p90_depth_m", 0.0)
+                    ),
+                    "depth_centroid_to_aperture_offset_px": float(
+                        diagnostics.get(
+                            "depth_centroid_to_aperture_offset_px",
+                            0.0,
+                        )
+                    ),
+                    "expected_distance_m": float(
+                        diagnostics["expected_distance"]
+                    ),
+                    "axis_source": str(diagnostics["axis_source"]),
+                    "selection_score": float(
+                        diagnostics.get("selection_score", 0.0)
+                    ),
+                    "selection_score_raw": selection_score_raw,
+                    "selection_rank": int(
+                        diagnostics.get("selection_rank", 0)
+                    ),
+                    "selection_score_source": str(
+                        diagnostics.get("selection_score_source", "none")
+                    ),
+                }
+            )
+
+        msg = String()
+        msg.data = json.dumps(payload, separators=(",", ":"))
+        self.pub_candidates.publish(msg)
+
     def update_lock(self, point, axis, diagnostics):
+        surface_axis = normalize(
+            diagnostics.get("surface_equivalent_axis", axis),
+            fallback=axis,
+        )
         self.pose_samples.append((point.copy(), axis.copy()))
+        self.surface_axis_samples.append(surface_axis.copy())
         points = np.asarray([sample[0] for sample in self.pose_samples])
         axes = np.asarray([sample[1] for sample in self.pose_samples])
+        surface_axes = np.asarray(
+            [sample for sample in self.surface_axis_samples],
+            dtype=np.float64,
+        )
         center = np.median(points, axis=0)
         mean_axis = normalize(np.mean(axes, axis=0))
+        mean_surface_axis = normalize(
+            np.mean(surface_axes, axis=0),
+            fallback=surface_axis,
+        )
         center_spread = float(
             np.max(np.linalg.norm(points - center[None, :], axis=1))
         )
@@ -920,6 +2058,7 @@ class VlmPortPoseNode(Node):
 
         self.publish_point(self.pub_raw_point, point)
         self.publish_axis(self.pub_raw_axis, axis)
+        self.publish_axis(self.pub_selected_surface_axis, surface_axis)
         stable = (
             len(self.pose_samples) >= self.stable_frames
             and center_spread <= self.max_center_spread_m
@@ -928,6 +2067,7 @@ class VlmPortPoseNode(Node):
         if stable and self.locked_point is None:
             self.locked_point = center.copy()
             self.locked_axis = mean_axis.copy()
+            self.locked_surface_axis = mean_surface_axis.copy()
             self.locked_axis_source = diagnostics["axis_source"]
             self.publish_locked_pose()
             self.get_logger().info(
@@ -940,6 +2080,25 @@ class VlmPortPoseNode(Node):
         self.publish_status(
             "source=sam3+rgbd "
             f"prompt={self.current_prompt!r} score={self.latest_score:.3f} "
+            f"candidate=H{diagnostics.get('selected_id', '?')} "
+            f"raw_candidates={diagnostics.get('raw_candidate_count', '?')} "
+            f"candidates={diagnostics.get('candidate_count', '?')} "
+            f"rejected={diagnostics.get('rejected_count', '?')} "
+            f"{diagnostics.get('filter_note', '')} "
+            f"language={diagnostics.get('language_target', 'none')} "
+            f"reference={diagnostics.get('language_reference_frame', 'none')} "
+            f"score={diagnostics.get('selection_score', 0.0):.3f} "
+            f"rank={diagnostics.get('selection_rank', 0)} "
+            f"geom_offset={diagnostics.get('depth_hole_center_offset_px', 0.0):.1f}px "
+            f"ap_offset={diagnostics.get('depth_centroid_to_aperture_offset_px', 0.0):.1f}px "
+            f"overlap={diagnostics.get('depth_hole_overlap_fraction', 0.0):.2f} "
+            f"circ={diagnostics.get('depth_hole_circularity', 0.0):.2f} "
+            f"depth={diagnostics.get('depth_hole_median_depth_m', 0.0):.3f}m "
+            f"sections={diagnostics.get('section_center_count', 0)} "
+            f"surface_axis=({surface_axis[0]:.3f},{surface_axis[1]:.3f},"
+            f"{surface_axis[2]:.3f}) "
+            f"axis_surface_angle="
+            f"{diagnostics.get('axis_surface_angle_deg', 0.0):.1f}deg "
             f"mask={diagnostics['area']}px hole={diagnostics['hole_area']}px "
             f"plane={diagnostics['plane_count']} "
             f"rms={diagnostics['plane_rms']:.4f}m "
@@ -963,6 +2122,13 @@ class VlmPortPoseNode(Node):
                 if self.locked_axis is None
                 else self.locked_axis.copy()
             )
+            locked_surface_axis = (
+                None
+                if self.locked_surface_axis is None
+                else self.locked_surface_axis.copy()
+            )
+            last_candidates = list(self.last_candidates)
+            last_selected_candidate_id = self.last_selected_candidate_id
             locked_axis_source = self.locked_axis_source
             depth = (
                 None
@@ -977,6 +2143,9 @@ class VlmPortPoseNode(Node):
                 info,
                 point=locked_point,
                 axis=locked_axis,
+                surface_axis=locked_surface_axis,
+                candidates=last_candidates,
+                selected_candidate_id=last_selected_candidate_id,
                 status=(
                     "center: SAM3-guided RGB-D  |  "
                     f"axis: {locked_axis_source}"
@@ -1021,14 +2190,66 @@ class VlmPortPoseNode(Node):
                 locked=False,
             )
             return
+        candidates = []
+        selected_candidate_id = None
         try:
-            point, axis, diagnostics = self.estimate_pose(mask, depth, info)
+            candidates, rejected = self.estimate_pose_candidates(mask, depth, info)
+            raw_candidate_count = len(candidates)
+            filter_note = ""
+            if self.language_requests_phantom_surface():
+                candidates, filter_note = self.filter_candidates_to_phantom_surface(
+                    candidates
+                )
+            self.publish_candidates(
+                candidates,
+                raw_count=raw_candidate_count,
+                filter_note=filter_note,
+            )
+            selected = self.select_pose_candidate(candidates)
+            selected_candidate_id = int(selected["id"])
+            point = selected["point"]
+            axis = selected["axis"]
+            diagnostics = dict(selected["diagnostics"])
+            surface_axis = normalize(
+                diagnostics.get("surface_equivalent_axis", axis),
+                fallback=axis,
+            )
+            diagnostics["candidate_count"] = len(candidates)
+            diagnostics["raw_candidate_count"] = raw_candidate_count
+            diagnostics["rejected_count"] = rejected
+            diagnostics["selected_id"] = selected_candidate_id
+            diagnostics["filter_note"] = filter_note
+            with self.lock:
+                self.last_candidates = list(candidates)
+                self.last_selected_candidate_id = selected_candidate_id
+                self.last_filter_note = filter_note
+                self.last_language_target = diagnostics.get(
+                    "language_target",
+                    "none",
+                )
+                self.last_language_reference_frame = diagnostics.get(
+                    "language_reference_frame",
+                    "none",
+                )
+            self.publish_candidates(
+                candidates,
+                raw_count=raw_candidate_count,
+                filter_note=filter_note,
+                selected_id=selected_candidate_id,
+                language_target=diagnostics.get("language_target", "none"),
+                language_reference_frame=diagnostics.get(
+                    "language_reference_frame",
+                    "none",
+                ),
+            )
         except Exception as exc:
             self.pose_samples.clear()
             self.publish_status(f"port estimate rejected: {exc}", valid=False)
             self.publish_overlay(
                 mask,
                 info,
+                candidates=candidates,
+                selected_candidate_id=selected_candidate_id,
                 status=f"estimate rejected: {exc}",
                 locked=False,
             )
@@ -1046,14 +2267,25 @@ class VlmPortPoseNode(Node):
                 if is_locked
                 else axis.copy()
             )
+            overlay_surface_axis = (
+                self.locked_surface_axis.copy()
+                if is_locked and self.locked_surface_axis is not None
+                else surface_axis.copy()
+            )
         self.publish_overlay(
             mask,
             info,
             point=overlay_point,
             axis=overlay_axis,
+            surface_axis=overlay_surface_axis,
+            candidates=candidates,
+            selected_candidate_id=selected_candidate_id,
             status=(
                 f"center=({overlay_point[0]:.3f},"
                 f"{overlay_point[1]:.3f},{overlay_point[2]:.3f}) m  "
+                f"H{selected_candidate_id} "
+                f"candidates={len(candidates)} "
+                f"{diagnostics.get('filter_note', '')} "
                 f"axis={diagnostics['axis_source']}"
             ),
             locked=is_locked,

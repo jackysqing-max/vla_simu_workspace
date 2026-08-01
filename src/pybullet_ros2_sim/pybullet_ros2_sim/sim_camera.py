@@ -74,7 +74,14 @@ class SimRGBDCamera:
         fov_y = math.radians(self.cfg.fov_y_deg)
 
         fy = height / (2.0 * math.tan(fov_y / 2.0))
-        fx = fy * (width / float(height))
+        # PyBullet's computeProjectionMatrixFOV takes a vertical FOV plus an
+        # aspect ratio. The horizontal FOV is derived as:
+        #   tan(fov_x / 2) = aspect * tan(fov_y / 2)
+        # Therefore fx = width / (2*tan(fov_x/2)) = height/(2*tan(fov_y/2)).
+        # Keeping fx=fy is what makes RGB-D back-projection match PyBullet's
+        # rendered geometry. Multiplying by aspect would shrink horizontal
+        # world distances by height/width (0.75 for 640x480).
+        fx = fy
         cx = (width - 1) / 2.0
         cy = (height - 1) / 2.0
         return fx, fy, cx, cy

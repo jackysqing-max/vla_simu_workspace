@@ -383,29 +383,66 @@ def _positive_float(value, default: float) -> float:
     return value
 
 
+def _positive_or_default(value, default: float) -> float:
+    """Use the RCM primitive default when a positive field was sanitized to zero."""
+    try:
+        value = float(value)
+    except Exception:
+        return float(default)
+    default = float(default)
+    if value < 0.0:
+        return default
+    if value == 0.0 and default > 0.0:
+        return default
+    return value
+
+
 def _canonicalize_surgical_rcm_steps(steps: list[dict]) -> list[dict]:
     if not steps:
         return []
 
+    by_action = {
+        str(step.get("action", "")).strip().lower(): step
+        for step in steps
+        if isinstance(step, dict)
+    }
     canonical = []
     for index, action in enumerate(SURGICAL_RCM_ACTIONS, start=1):
         default = SURGICAL_RCM_STEP_DEFAULTS[action]
+        source = by_action.get(action, {})
+        source_prompt = str(source.get("target_prompt", "") or "").strip()
+        source_description = str(source.get("description", "") or "").strip()
         canonical.append(
             {
                 "step_index": index,
                 "action": action,
                 "target_prompt": (
-                    "circular hole"
+                    (source_prompt or "circular hole")
                     if action != "execute_rcm_circle"
                     else ""
                 ),
-                "description": default["description"],
-                "success_radius_m": 0.006,
-                "dwell_sec": default["dwell_sec"],
+                "description": source_description or default["description"],
+                "success_radius_m": _positive_or_default(
+                    source.get("success_radius_m", 0.006),
+                    0.006,
+                ),
+                "dwell_sec": _positive_or_default(
+                    source.get("dwell_sec", default["dwell_sec"]),
+                    default["dwell_sec"],
+                ),
                 "wait_sec": 0.0,
-                "insertion_depth_m": default["insertion_depth_m"],
-                "trajectory_radius_m": default["trajectory_radius_m"],
-                "trajectory_cycles": default["trajectory_cycles"],
+                "insertion_depth_m": _positive_or_default(
+                    source.get("insertion_depth_m", default["insertion_depth_m"]),
+                    default["insertion_depth_m"],
+                ),
+                "trajectory_radius_m": _positive_or_default(
+                    source.get("trajectory_radius_m", default["trajectory_radius_m"]),
+                    default["trajectory_radius_m"],
+                ),
+                "trajectory_cycles": _positive_or_default(
+                    source.get("trajectory_cycles", default["trajectory_cycles"]),
+                    default["trajectory_cycles"],
+                ),
             }
         )
     return canonical
@@ -771,7 +808,20 @@ def _infer_surgical_rcm_plan_from_instruction(
                 "Perception locks the port pose before any robot motion."
             ),
             "steps": [
-                {"step_index": index, "action": action}
+                {
+                    "step_index": index,
+                    "action": action,
+                    "target_prompt": (
+                        text
+                        if action != "execute_rcm_circle"
+                        else ""
+                    ),
+                    "description": (
+                        f"{action} for {text}"
+                        if action != "execute_rcm_circle"
+                        else "execute RCM circular trajectory"
+                    ),
+                }
                 for index, action in enumerate(SURGICAL_RCM_ACTIONS, start=1)
             ],
         },
