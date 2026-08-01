@@ -31,6 +31,12 @@ VLM_RCM_EXPECTED_X_M="${VLM_RCM_EXPECTED_X_M:-0.701726}"
 VLM_RCM_EXPECTED_Y_M="${VLM_RCM_EXPECTED_Y_M:-0.0}"
 VLM_RCM_EXPECTED_Z_M="${VLM_RCM_EXPECTED_Z_M:-0.404701}"
 VLM_RCM_AXIS_MODE="${VLM_RCM_AXIS_MODE:-calibrated}"
+VLM_RCM_START_SEMANTIC_GROUNDER="${VLM_RCM_START_SEMANTIC_GROUNDER:-true}"
+QWEN3_PORT="${QWEN3_PORT:-8000}"
+QWEN_VL_MODEL="${QWEN_VL_MODEL:-${QWEN_MODEL:-Qwen/Qwen3-VL-4B-Instruct}}"
+QWEN_VL_API_BASE_URL="${QWEN_VL_API_BASE_URL:-http://127.0.0.1:${QWEN3_PORT}/v1/chat/completions}"
+QWEN_VL_API_KEY="${QWEN_VL_API_KEY:-EMPTY}"
+QWEN_VL_EXTRA_REQUEST_BODY_JSON="${QWEN_VL_EXTRA_REQUEST_BODY_JSON:-{\"top_k\":20,\"chat_template_kwargs\":{\"enable_thinking\":false}}}"
 
 PHANTOM_MESH="${PHANTOM_MESH:-$WS/install/rcm_virtual_fixtures/share/rcm_virtual_fixtures/meshes/phantom_multi.STL}"
 if [[ ! -f "$PHANTOM_MESH" ]]; then
@@ -135,7 +141,7 @@ stop_all() {
 
 show_status() {
   local name
-  for name in vlm_rcm_port_sim vlm_rcm_port_pose vlm_rcm_port_sam3; do
+  for name in vlm_rcm_port_sim vlm_rcm_port_pose vlm_rcm_port_semantic vlm_rcm_port_sam3; do
     local pid_file="$PID_DIR/${name}.pid"
     local pid=""
     [[ -f "$pid_file" ]] && pid="$(cat "$pid_file" 2>/dev/null || true)"
@@ -230,29 +236,46 @@ case "${1:-start}" in
        -p hole_min_area_px:=80 \
        -p min_mask_area_px:=25 \
        -p min_score:=0.03 \
-       -p stable_frames:=3 \
-       -p stability_window:=5 \
-       -p max_center_spread_m:=0.006 \
-       -p max_axis_spread_deg:=6.0 \
-       -p default_spatial_reference_frame:=image \
-       -p phantom_left_axis_world:='[0.0,1.0,0.0]' \
-       -p phantom_up_axis_world:='[1.0,0.0,0.0]' \
-       -p display_overlay:=$VLM_RCM_DISPLAY_OVERLAY \
-       -p display_scale:=$VLM_RCM_DISPLAY_SCALE"
+	       -p stable_frames:=3 \
+	       -p stability_window:=5 \
+	       -p max_center_spread_m:=0.006 \
+	       -p max_axis_spread_deg:=6.0 \
+	       -p display_overlay:=$VLM_RCM_DISPLAY_OVERLAY \
+	       -p display_scale:=$VLM_RCM_DISPLAY_SCALE"
 
-    start_bg_sam3
+	    if [[ "$VLM_RCM_START_SEMANTIC_GROUNDER" == "true" ]]; then
+	      start_bg_ros vlm_rcm_port_semantic \
+	        "ros2 run rcm_virtual_fixtures semantic_port_grounder_node --ros-args \
+	         -p api_base_url:='$QWEN_VL_API_BASE_URL' \
+	         -p api_key:='$QWEN_VL_API_KEY' \
+	         -p api_key_required:=false \
+	         -p model:='$QWEN_VL_MODEL' \
+	         -p temperature:=0.0 \
+	         -p top_p:=1.0 \
+	         -p max_output_tokens:=768 \
+	         -p request_timeout_sec:=90.0 \
+	         -p extra_request_body_json:='$QWEN_VL_EXTRA_REQUEST_BODY_JSON' \
+	         -p require_scoring_program:=true \
+	         -p min_model_margin:=0.08 \
+	         -p min_expression_margin:=0.000001"
+	    fi
 
-    echo
-    echo "[OK] SAM3 VLM-RCM port perception demo started."
-    echo "     prompt: $SAM3_PROMPT"
-    echo "     PyBullet: yellow sphere = exact locked point; green spheres = candidates; cyan arrow = inward axis"
-    echo "     Camera window: green = SAM3 mask, cyan = center/axis"
-    echo
-    echo "Monitor:"
-    echo "  ros2 topic echo /vlm_rcm/status"
-    echo "  ros2 topic echo /vlm_rcm/locked_port_point"
-    echo "  ros2 topic echo /vlm_rcm/locked_port_axis"
-    echo "  ros2 topic echo /vlm_rcm/locked_surface_axis"
+	    start_bg_sam3
+
+	    echo
+	    echo "[OK] SAM3 VLM-RCM port perception demo started."
+	    echo "     prompt: $SAM3_PROMPT"
+	    echo "     semantic grounder: $VLM_RCM_START_SEMANTIC_GROUNDER model=$QWEN_VL_MODEL"
+	    echo "     PyBullet: yellow sphere = exact locked point; green spheres = candidates; cyan arrow = inward axis"
+	    echo "     Camera window: green = SAM3 mask, IDs = dynamic candidates"
+	    echo
+	    echo "Monitor:"
+	    echo "  ros2 topic echo /vlm_rcm/status"
+	    echo "  ros2 topic echo /vlm_rcm/semantic_status"
+	    echo "  ros2 topic echo /vlm_rcm/verification_result"
+	    echo "  ros2 topic echo /vlm_rcm/locked_port_point"
+	    echo "  ros2 topic echo /vlm_rcm/locked_port_axis"
+	    echo "  ros2 topic echo /vlm_rcm/locked_surface_axis"
     ;;
   stop)
     source_env >/dev/null 2>&1 || true
@@ -262,11 +285,12 @@ case "${1:-start}" in
   status)
     show_status
     ;;
-  logs)
-    tail -n 100 -f \
-      "$LOG_DIR/vlm_rcm_port_sim.log" \
-      "$LOG_DIR/vlm_rcm_port_pose.log" \
-      "$LOG_DIR/vlm_rcm_port_sam3.log"
+	  logs)
+	    tail -n 100 -f \
+	      "$LOG_DIR/vlm_rcm_port_sim.log" \
+	      "$LOG_DIR/vlm_rcm_port_pose.log" \
+	      "$LOG_DIR/vlm_rcm_port_semantic.log" \
+	      "$LOG_DIR/vlm_rcm_port_sam3.log"
     ;;
   prompt)
     shift || true

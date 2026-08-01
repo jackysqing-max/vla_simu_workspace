@@ -37,6 +37,7 @@ class LocateCapture(Node):
         ready_topic: str,
         status_topic: str,
         candidates_topic: str,
+        verification_topic: str,
         locked_point_topic: str,
         locked_surface_axis_topic: str,
     ):
@@ -49,6 +50,7 @@ class LocateCapture(Node):
         self.locked_surface_axis_event = threading.Event()
         self.status_text = ""
         self.candidates_text = ""
+        self.verification_text = ""
         self.locked_point = None
         self.locked_surface_axis = None
 
@@ -59,6 +61,7 @@ class LocateCapture(Node):
         self.create_subscription(Bool, ready_topic, self.on_ready, 10)
         self.create_subscription(String, status_topic, self.on_status, 10)
         self.create_subscription(String, candidates_topic, self.on_candidates, 10)
+        self.create_subscription(String, verification_topic, self.on_verification, 10)
         self.create_subscription(
             PointStamped,
             locked_point_topic,
@@ -88,6 +91,20 @@ class LocateCapture(Node):
     def on_candidates(self, msg: String):
         self.candidates_text = msg.data
         self.candidate_event.set()
+
+    def on_verification(self, msg: String):
+        self.verification_text = msg.data
+        try:
+            payload = json.loads(msg.data)
+            print(
+                "[VERIFY] "
+                f"{payload.get('decision')} "
+                f"selected={payload.get('selected_candidate_id')} "
+                f"reason={payload.get('reason')}",
+                flush=True,
+            )
+        except Exception:
+            print(f"[VERIFY] {msg.data}", flush=True)
 
     def on_locked_point(self, msg: PointStamped):
         self.locked_point = (
@@ -143,6 +160,7 @@ class LocateCapture(Node):
 def pretty_print_result(
     command: str,
     candidates_text: str,
+    verification_text: str,
     locked_point,
     locked_surface_axis,
 ):
@@ -168,11 +186,29 @@ def pretty_print_result(
             selected = hole
             break
 
+    if verification_text:
+        try:
+            verification = json.loads(verification_text)
+            print(
+                "\n================ VERIFICATION ===================",
+                flush=True,
+            )
+            print(
+                "decision="
+                f"{verification.get('decision')} "
+                "selected="
+                f"{verification.get('selected_candidate_id')} "
+                "reason="
+                f"{verification.get('reason')}",
+                flush=True,
+            )
+        except json.JSONDecodeError:
+            print("\n================ VERIFICATION ===================", flush=True)
+            print(verification_text, flush=True)
+
     print(
-        "target="
-        f"{payload.get('language_target', 'none')} "
-        "reference="
-        f"{payload.get('language_reference_frame', 'none')} "
+        "verified="
+        f"{payload.get('verified_selection', {}).get('decision', 'NONE')} "
         "selected="
         f"H{selected_id if selected_id is not None else '?'} "
         "candidates="
@@ -308,6 +344,7 @@ def build_parser():
     parser.add_argument("--ready-topic", default="/vlm_rcm/port_ready")
     parser.add_argument("--status-topic", default="/vlm_rcm/status")
     parser.add_argument("--candidates-topic", default="/vlm_rcm/hole_candidates")
+    parser.add_argument("--verification-topic", default="/vlm_rcm/verification_result")
     parser.add_argument("--locked-point-topic", default="/vlm_rcm/locked_port_point")
     parser.add_argument("--locked-surface-axis-topic", default="/vlm_rcm/locked_surface_axis")
     parser.add_argument("--timeout-sec", type=float, default=45.0)
@@ -328,6 +365,7 @@ def main(argv=None):
         ready_topic=args.ready_topic,
         status_topic=args.status_topic,
         candidates_topic=args.candidates_topic,
+        verification_topic=args.verification_topic,
         locked_point_topic=args.locked_point_topic,
         locked_surface_axis_topic=args.locked_surface_axis_topic,
     )
@@ -356,6 +394,7 @@ def main(argv=None):
         pretty_print_result(
             command,
             node.candidates_text,
+            node.verification_text,
             node.locked_point,
             node.locked_surface_axis,
         )

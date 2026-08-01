@@ -15,7 +15,9 @@ from std_msgs.msg import Bool, String
 
 from pybullet_ros2_sim.task_plan_utils import (
     SURGICAL_RCM_ACTIONS,
+    SURGICAL_RCM_STEP_DEFAULTS,
     plan_from_json,
+    rcm_task_request_from_json,
 )
 
 
@@ -212,6 +214,7 @@ class SurgicalRcmTaskExecutor(Node):
         )
 
         self.plan = None
+        self.execution_steps = []
         self.step_cursor = 0
         self.step_satisfied_since_ns = None
         self.last_prompt_ns = 0
@@ -273,15 +276,13 @@ class SurgicalRcmTaskExecutor(Node):
         msg.data = str(command)
         self.pub_language_command.publish(msg)
 
-    def _localize_language_command(self, step: dict) -> str:
-        target = str(step.get("target_prompt", "") or "").strip()
-        description = str(step.get("description", "") or "").strip()
-        command = " ".join(piece for piece in (target, description) if piece).strip()
+    def _localize_language_command(self) -> str:
+        task = self.plan if isinstance(self.plan, dict) else {}
+        command = str(task.get("instruction", "") or "").strip()
+        if not command:
+            command = str(task.get("objective_text", "") or "").strip()
         if not command:
             command = "circular hole"
-        lower = command.lower()
-        if not any(word in lower for word in ("phantom", "仿体", "体模", "模型")):
-            command = f"on phantom {command}"
         return command
 
     def _publish_status(self, text: str, *, force: bool = False):
@@ -309,28 +310,40 @@ class SurgicalRcmTaskExecutor(Node):
 
     def on_plan(self, msg: String):
         try:
-            plan = plan_from_json(
-                msg.data,
-                allow_open_vocabulary=True,
-                allow_rcm_actions=True,
-            )
+            plan = rcm_task_request_from_json(msg.data)
         except Exception as exc:
-            self.get_logger().error(f"invalid surgical RCM plan: {exc}")
-            self._publish_status(
-                f"plan_rejected: invalid_json error={exc}",
-                force=True,
-            )
-            return
+            try:
+                legacy_plan = plan_from_json(
+                    msg.data,
+                    allow_open_vocabulary=True,
+                    allow_rcm_actions=False,
+                )
+                plan = {
+                    "instruction": legacy_plan.get("task_summary", ""),
+                    "objective_text": legacy_plan.get("task_summary", ""),
+                    "selected_candidate_id": None,
+                    "exclusions": [],
+                    "allow_alternative": False,
+                    "terminal_operation": "execute_rcm_circle",
+                    "requested_insertion_depth_m": 0.0,
+                    "approach_preference": "",
+                    "verification": {"decision": "PENDING", "source": "legacy_plan"},
+                }
+            except Exception:
+                self.get_logger().error(f"invalid surgical RCM task request: {exc}")
+                self._publish_status(
+                    f"task_rejected: invalid_json error={exc}",
+                    force=True,
+                )
+                return
 
-        actions = tuple(step["action"] for step in plan["steps"])
-        if actions != SURGICAL_RCM_ACTIONS:
-            self._publish_status(
-                f"plan_rejected: invalid_action_order actions={actions}",
-                force=True,
-            )
+        steps = self._execution_steps_for_task(plan)
+        if not steps and plan.get("terminal_operation") != "stop":
+            self._publish_status("task_rejected: no_supported_execution_steps", force=True)
             return
 
         self.plan = plan
+        self.execution_steps = steps
         self.step_cursor = 0
         self.step_satisfied_since_ns = None
         self.last_prompt_ns = 0
@@ -342,13 +355,17 @@ class SurgicalRcmTaskExecutor(Node):
         self._publish_controller_pivot_start(False)
         self._publish_controller_pivot_hold(False)
         self._publish_camera_enable(True)
-        self._publish_active_step(plan["steps"][0])
+        if not steps:
+            self.plan_complete = True
+        self._publish_active_step(steps[0] if steps else None)
         self._publish_status(
-            f"plan_accepted: {len(plan['steps'])} surgical RCM steps",
+            "task_accepted: "
+            f"terminal_operation={plan.get('terminal_operation')} "
+            f"internal_steps={len(steps)}",
             force=True,
         )
         self.get_logger().info(
-            f"[PLAN] accepted: {plan['task_summary']}"
+            f"[TASK] accepted: {plan.get('instruction', '')}"
         )
 
     def on_port_ready(self, msg: Bool):
@@ -379,9 +396,40 @@ class SurgicalRcmTaskExecutor(Node):
         self.controller_status = str(msg.data)
 
     def _current_step(self):
-        if self.plan is None or self.step_cursor >= len(self.plan["steps"]):
+        if self.plan is None or self.step_cursor >= len(self.execution_steps):
             return None
-        return self.plan["steps"][self.step_cursor]
+        return self.execution_steps[self.step_cursor]
+
+    def _execution_steps_for_task(self, task: dict) -> list[dict]:
+        terminal_operation = str(task.get("terminal_operation", "execute_rcm_circle"))
+        if terminal_operation == "stop":
+            return []
+        if terminal_operation == "localize_only":
+            actions = ("localize_rcm_port",)
+        elif terminal_operation in {"establish_rcm", "hold", "retract"}:
+            actions = SURGICAL_RCM_ACTIONS[:3]
+        else:
+            actions = SURGICAL_RCM_ACTIONS
+
+        steps = []
+        for index, action in enumerate(actions, start=1):
+            defaults = SURGICAL_RCM_STEP_DEFAULTS[action]
+            steps.append(
+                {
+                    "step_index": index,
+                    "action": action,
+                    "description": defaults["description"],
+                    "dwell_sec": defaults["dwell_sec"],
+                    "wait_sec": 0.0,
+                    "insertion_depth_m": defaults["insertion_depth_m"],
+                    "trajectory_radius_m": defaults["trajectory_radius_m"],
+                    "trajectory_cycles": defaults["trajectory_cycles"],
+                    "task_instruction": task.get("instruction", ""),
+                    "objective_text": task.get("objective_text", ""),
+                    "terminal_operation": terminal_operation,
+                }
+            )
+        return steps
 
     def _step_dwell_satisfied(self, condition: bool, dwell_sec: float):
         if not condition:
@@ -403,9 +451,8 @@ class SurgicalRcmTaskExecutor(Node):
             f"{completed['action']}"
         )
         if completed["action"] == "localize_rcm_port":
-            self._publish_camera_enable(False)
             self.get_logger().info(
-                "[PERCEPTION_LOCK] RGB-D rendering disabled after port lock"
+                "[PERCEPTION_LOCK] verified port locked; RGB-D remains enabled for monitoring"
             )
         self.step_cursor += 1
         self.step_satisfied_since_ns = None
@@ -413,10 +460,10 @@ class SurgicalRcmTaskExecutor(Node):
         self._publish_active_step(next_step)
         if next_step is None:
             self.plan_complete = True
-            self._publish_controller_pivot_hold(True)
+            if self.controller_start_sent:
+                self._publish_controller_pivot_hold(True)
             self._publish_status(
-                "plan_completed: RCM circular trajectory demonstrated; "
-                "controller entered RCM_HOLD",
+                "task_completed: deterministic RCM execution reached terminal operation",
                 force=True,
             )
         else:
@@ -432,7 +479,7 @@ class SurgicalRcmTaskExecutor(Node):
             now_ns - self.last_prompt_ns
         ) * 1e-9 >= self.prompt_republish_sec:
             self._publish_prompt(self.port_detection_prompt)
-            self._publish_language_command(self._localize_language_command(step))
+            self._publish_language_command(self._localize_language_command())
         localized = (
             self.port_ready
             and self.port_point is not None

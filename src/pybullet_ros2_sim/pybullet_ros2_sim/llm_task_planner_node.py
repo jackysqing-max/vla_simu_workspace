@@ -17,12 +17,14 @@ from std_msgs.msg import String
 
 from pybullet_ros2_sim.task_plan_utils import (
     PLAN_JSON_SCHEMA,
-    SURGICAL_RCM_PLAN_JSON_SCHEMA,
+    SURGICAL_RCM_TASK_JSON_SCHEMA,
     SUPPORTED_TARGET_PROMPTS,
     infer_plan_from_instruction,
     plan_to_json,
+    rcm_task_request_to_json,
     scene_registry_from_json,
     scene_registry_summary,
+    sanitize_rcm_task_request,
     sanitize_plan,
 )
 
@@ -255,7 +257,7 @@ class LlmTaskPlanner(Node):
 
     def _build_responses_payload(self, instruction_text: str) -> dict:
         plan_schema = (
-            SURGICAL_RCM_PLAN_JSON_SCHEMA
+            SURGICAL_RCM_TASK_JSON_SCHEMA
             if self.enable_rcm_actions
             else PLAN_JSON_SCHEMA
         )
@@ -279,7 +281,7 @@ class LlmTaskPlanner(Node):
 
     def _build_chat_completions_payload(self, instruction_text: str) -> dict:
         plan_schema = (
-            SURGICAL_RCM_PLAN_JSON_SCHEMA
+            SURGICAL_RCM_TASK_JSON_SCHEMA
             if self.enable_rcm_actions
             else PLAN_JSON_SCHEMA
         )
@@ -308,23 +310,19 @@ class LlmTaskPlanner(Node):
     def _system_prompt(self) -> str:
         if self.enable_rcm_actions:
             return (
-                "You are a safety-constrained laparoscopic robot task planner. "
-                "Convert the user's instruction into exactly four executable "
-                "JSON steps in this strict order: "
-                "1) localize_rcm_port, 2) align_tool_axis, "
-                "3) establish_rcm, 4) execute_rcm_circle. "
+                "You are a semantic task-request generator for a laparoscopic "
+                "RCM access demo. Convert the user's instruction into one high-level "
+                "JSON task request. "
                 "Return JSON only, with no markdown or extra prose. "
-                "localize_rcm_port locks the port center and axis before motion. "
-                "align_tool_axis moves to a collinear pre-insertion pose. "
-                "establish_rcm inserts along the locked axis and fixes the port "
-                "center as the RCM point. execute_rcm_circle starts the "
-                "constrained circular trajectory. "
-                "Each raw model step must contain only step_index and action. "
-                "The deterministic safety layer will add prompts, descriptions, "
-                "thresholds, insertion depth, circle radius, and dwell times. "
-                "Never reorder or omit a step. "
-                "The LLM does not output joint angles, torques, poses, or "
-                "unconstrained free-space motions."
+                "The task request may describe the desired port, preferences, "
+                "exclusions, whether alternatives are allowed, and the requested "
+                "terminal operation. Use terminal_operation only as an execution "
+                "intent: localize_only, establish_rcm, execute_rcm_circle, hold, "
+                "retract, or stop. Do not expand the task into controller stages. "
+                "Do not output joint angles, torques, Cartesian poses, tool paths, "
+                "or arbitrary executable robot commands. The dynamic port candidate "
+                "selection will be grounded later by a Qwen-VL semantic grounder "
+                "using the marked camera image and candidate geometry."
             )
         if self.open_vocabulary_targets:
             if self.enable_grasp_actions:
@@ -441,19 +439,46 @@ class LlmTaskPlanner(Node):
         else:
             plan_text = _extract_chat_completion_text(response_json)
 
+        parsed = _extract_json_object(plan_text)
+        if self.enable_rcm_actions:
+            return sanitize_rcm_task_request(
+                parsed,
+                fallback_instruction=instruction_text,
+            )
         return sanitize_plan(
-            _extract_json_object(plan_text),
+            parsed,
             allow_open_vocabulary=self.open_vocabulary_targets,
             allow_grasp_actions=self.enable_grasp_actions,
-            allow_rcm_actions=self.enable_rcm_actions,
+            allow_rcm_actions=False,
         )
 
     def _plan_with_fallback(self, instruction: str) -> tuple[dict, bool]:
         try:
             plan = self._request_plan(instruction)
-            if plan["steps"]:
+            if self.enable_rcm_actions:
+                if plan["instruction"]:
+                    return plan, False
+                if not self.allow_local_fallback:
+                    self.get_logger().error(
+                        "[PLAN] LLM returned an empty RCM task request; local "
+                        "fallback is disabled"
+                    )
+                    return plan, False
+            if not self.enable_rcm_actions and plan["steps"]:
                 return plan, False
             if not self.allow_local_fallback:
+                if self.enable_rcm_actions:
+                    return sanitize_rcm_task_request(
+                        {
+                            "instruction": instruction,
+                            "objective_text": instruction,
+                            "terminal_operation": "stop",
+                            "verification": {
+                                "decision": "REJECT",
+                                "reason": "llm_returned_no_task_request",
+                            },
+                        }
+                    ), False
                 self.get_logger().error(
                     "[PLAN] LLM returned no executable steps after sanitization; local "
                     "fallback is disabled"
@@ -472,6 +497,18 @@ class LlmTaskPlanner(Node):
             detail = exc.read().decode("utf-8", errors="ignore")
             self.get_logger().error(f"[PLAN] HTTPError {exc.code}: {detail}")
             if not self.allow_local_fallback:
+                if self.enable_rcm_actions:
+                    return sanitize_rcm_task_request(
+                        {
+                            "instruction": instruction,
+                            "objective_text": instruction,
+                            "terminal_operation": "stop",
+                            "verification": {
+                                "decision": "REJECT",
+                                "reason": f"llm_http_error_{exc.code}",
+                            },
+                        }
+                    ), False
                 return {
                     "task_summary": instruction,
                     "planning_notes": f"LLM HTTPError {exc.code}; local fallback is disabled.",
@@ -480,6 +517,18 @@ class LlmTaskPlanner(Node):
         except Exception as exc:
             self.get_logger().error(f"[PLAN] failed: {exc}")
             if not self.allow_local_fallback:
+                if self.enable_rcm_actions:
+                    return sanitize_rcm_task_request(
+                        {
+                            "instruction": instruction,
+                            "objective_text": instruction,
+                            "terminal_operation": "stop",
+                            "verification": {
+                                "decision": "REJECT",
+                                "reason": f"llm_failed:{exc}",
+                            },
+                        }
+                    ), False
                 return {
                     "task_summary": instruction,
                     "planning_notes": f"LLM planning failed: {exc}; local fallback is disabled.",
@@ -492,6 +541,9 @@ class LlmTaskPlanner(Node):
             allow_grasp_actions=self.enable_grasp_actions,
             allow_rcm_actions=self.enable_rcm_actions,
         )
+        if self.enable_rcm_actions:
+            self.get_logger().warning("[PLAN] using local RCM task-request fallback")
+            return fallback_plan, True
         if fallback_plan["steps"]:
             self.get_logger().warning(
                 f"[PLAN] using local fallback with {len(fallback_plan['steps'])} steps"
@@ -508,6 +560,18 @@ class LlmTaskPlanner(Node):
         self._publish_status("planning")
 
         plan, used_fallback = self._plan_with_fallback(instruction)
+
+        if self.enable_rcm_actions:
+            if not plan.get("instruction", ""):
+                self.get_logger().warning("[PLAN] empty RCM task request returned")
+                self._publish_status("planning_failed: empty_rcm_task_request")
+                return
+            out = String()
+            out.data = rcm_task_request_to_json(plan)
+            self.pub_plan.publish(out)
+            status = "planned_fallback" if used_fallback else "planned"
+            self._publish_status(f"{status}: rcm_task_request")
+            return
 
         if not plan["steps"]:
             self.get_logger().warning("[PLAN] no executable steps returned")

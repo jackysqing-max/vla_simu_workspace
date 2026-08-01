@@ -6,7 +6,6 @@ from __future__ import annotations
 from collections import deque
 import json
 import math
-import re
 import threading
 import time
 
@@ -154,7 +153,7 @@ def fit_plane_ransac(
 
 
 class VlmPortPoseNode(Node):
-    """Convert a text-grounded port mask into a stable world-frame port pose."""
+    """Extract dynamic RCM port candidates and lock externally verified choices."""
 
     def __init__(self):
         super().__init__("vlm_port_pose_node")
@@ -206,7 +205,7 @@ class VlmPortPoseNode(Node):
             "expected_port_world",
             [0.701726, 0.0, 0.404701],
         )
-        self.declare_parameter("expected_port_max_distance_m", 0.080)
+        self.declare_parameter("expected_port_max_distance_m", 0.0)
         self.declare_parameter("stable_frames", 3)
         self.declare_parameter("stability_window", 5)
         self.declare_parameter("max_center_spread_m", 0.006)
@@ -239,13 +238,15 @@ class VlmPortPoseNode(Node):
         self.declare_parameter("ready_topic", "/vlm_rcm/port_ready")
         self.declare_parameter("status_topic", "/vlm_rcm/status")
         self.declare_parameter("candidate_topic", "/vlm_rcm/hole_candidates")
-        self.declare_parameter("language_command_topic", "/vlm_rcm/language_command")
+        self.declare_parameter("candidate_alias_topic", "/vlm_rcm/candidates")
+        self.declare_parameter(
+            "verified_selection_topic",
+            "/vlm_rcm/verified_selected_port",
+        )
         self.declare_parameter("phantom_surface_min_gap_m", 0.035)
-        self.declare_parameter("default_spatial_reference_frame", "image")
-        self.declare_parameter("phantom_left_axis_world", [0.0, 1.0, 0.0])
-        self.declare_parameter("phantom_up_axis_world", [1.0, 0.0, 0.0])
         self.declare_parameter("reset_topic", "/vlm_rcm/reset_lock")
         self.declare_parameter("overlay_topic", "/vlm_rcm/overlay")
+        self.declare_parameter("candidate_overlay_topic", "/vlm_rcm/candidate_overlay")
         self.declare_parameter("display_overlay", True)
         self.declare_parameter("display_scale", 1.25)
         self.declare_parameter(
@@ -410,29 +411,12 @@ class VlmPortPoseNode(Node):
             float(self.get_parameter("axis_inside_m").value),
             0.005,
         )
-        self.language_command_topic = str(
-            self.get_parameter("language_command_topic").value
-        )
         self.phantom_surface_min_gap_m = max(
             float(self.get_parameter("phantom_surface_min_gap_m").value),
             0.001,
         )
-        self.default_spatial_reference_frame = str(
-            self.get_parameter("default_spatial_reference_frame").value
-        ).strip().lower()
-        if self.default_spatial_reference_frame not in {"image", "phantom"}:
-            self.get_logger().warning(
-                "unsupported default_spatial_reference_frame="
-                f"{self.default_spatial_reference_frame!r}; using 'image'"
-            )
-            self.default_spatial_reference_frame = "image"
-        self.phantom_left_axis_world = normalize(
-            self.get_parameter("phantom_left_axis_world").value,
-            fallback=(0.0, 1.0, 0.0),
-        )
-        self.phantom_up_axis_world = normalize(
-            self.get_parameter("phantom_up_axis_world").value,
-            fallback=(1.0, 0.0, 0.0),
+        self.verified_selection_topic = str(
+            self.get_parameter("verified_selection_topic").value
         )
 
         qos_image = QoSProfile(depth=1)
@@ -462,9 +446,9 @@ class VlmPortPoseNode(Node):
         self.create_subscription(String, self.prompt_topic, self.on_prompt, 10)
         self.create_subscription(
             String,
-            self.language_command_topic,
-            self.on_language_command,
-            10,
+            self.verified_selection_topic,
+            self.on_verified_selection,
+            qos_latched,
         )
         self.create_subscription(
             Bool,
@@ -523,9 +507,19 @@ class VlmPortPoseNode(Node):
             str(self.get_parameter("candidate_topic").value),
             qos_latched,
         )
+        self.pub_candidates_alias = self.create_publisher(
+            String,
+            str(self.get_parameter("candidate_alias_topic").value),
+            qos_latched,
+        )
         self.pub_overlay = self.create_publisher(
             Image,
             str(self.get_parameter("overlay_topic").value),
+            qos_image,
+        )
+        self.pub_candidate_overlay = self.create_publisher(
+            Image,
+            str(self.get_parameter("candidate_overlay_topic").value),
             qos_image,
         )
 
@@ -539,7 +533,6 @@ class VlmPortPoseNode(Node):
         self.latest_info = None
         self.latest_score = 0.0
         self.current_prompt = ""
-        self.current_language_command = ""
         self.pose_samples = deque(maxlen=self.stability_window)
         self.surface_axis_samples = deque(maxlen=self.stability_window)
         self.locked_point = None
@@ -549,8 +542,13 @@ class VlmPortPoseNode(Node):
         self.last_candidates = []
         self.last_selected_candidate_id = None
         self.last_filter_note = ""
-        self.last_language_target = "none"
-        self.last_language_reference_frame = "none"
+        self.verified_candidate_id = None
+        self.verified_instruction = ""
+        self.verified_reason = ""
+        self.verified_decision = "NONE"
+        self.verified_candidate_scores = {}
+        self.verified_candidate_ranks = {}
+        self.candidate_stability = {}
         self.last_status_time = 0.0
         self.create_timer(0.5, self.publish_locked_pose)
         self.publish_ready(False)
@@ -585,6 +583,24 @@ class VlmPortPoseNode(Node):
         with self.lock:
             self.latest_info = msg
 
+    def clear_lock_state(self, *, clear_verified_selection: bool = False):
+        self.pose_samples.clear()
+        self.surface_axis_samples.clear()
+        self.locked_point = None
+        self.locked_axis = None
+        self.locked_surface_axis = None
+        self.locked_axis_source = ""
+        self.last_candidates = []
+        self.last_selected_candidate_id = None
+        self.last_filter_note = ""
+        if clear_verified_selection:
+            self.verified_candidate_id = None
+            self.verified_instruction = ""
+            self.verified_reason = ""
+            self.verified_decision = "NONE"
+            self.verified_candidate_scores = {}
+            self.verified_candidate_ranks = {}
+
     def on_score(self, msg: Float32):
         with self.lock:
             self.latest_score = float(msg.data)
@@ -593,150 +609,91 @@ class VlmPortPoseNode(Node):
         with self.lock:
             prompt = str(msg.data or "").strip()
             if prompt != self.current_prompt:
-                self.pose_samples.clear()
-                self.surface_axis_samples.clear()
-                self.locked_point = None
-                self.locked_axis = None
-                self.locked_surface_axis = None
-                self.locked_axis_source = ""
-                self.last_candidates = []
-                self.last_selected_candidate_id = None
-                self.last_filter_note = ""
-                self.last_language_target = "none"
-                self.last_language_reference_frame = "none"
+                self.clear_lock_state(clear_verified_selection=True)
                 self.publish_ready(False)
             self.current_prompt = prompt
 
-    def on_language_command(self, msg: String):
-        with self.lock:
-            command = str(msg.data or "").strip()
-            if command:
-                self.pose_samples.clear()
-                self.surface_axis_samples.clear()
-                self.locked_point = None
-                self.locked_axis = None
-                self.locked_surface_axis = None
-                self.locked_axis_source = ""
-                self.last_candidates = []
-                self.last_selected_candidate_id = None
-                self.last_filter_note = ""
-                self.last_language_target = "none"
-                self.last_language_reference_frame = "none"
-                self.publish_ready(False)
-            self.current_language_command = command
-        self.publish_status(f"language command: {command or '<empty>'}")
+    @staticmethod
+    def parse_candidate_id(value):
+        text = str(value if value is not None else "").strip()
+        if not text:
+            return None
+        if text[:1].lower() == "h":
+            text = text[1:]
+        try:
+            candidate_id = int(text)
+        except Exception:
+            return None
+        return candidate_id if candidate_id >= 0 else None
 
-    def language_requests_phantom_surface(self) -> bool:
-        with self.lock:
-            text = f"{self.current_language_command} {self.current_prompt}".lower()
-        return any(
-            keyword in text
-            for keyword in (
-                "phantom",
-                "仿体",
-                "体模",
-                "模型",
-                "phantom上",
-                "phantom 上",
+    def on_verified_selection(self, msg: String):
+        try:
+            payload = json.loads(msg.data)
+            if not isinstance(payload, dict):
+                raise ValueError("verified selection must be a JSON object")
+        except Exception as exc:
+            self.publish_status(f"verified selection rejected: invalid JSON {exc}", valid=False)
+            return
+
+        decision = str(payload.get("decision", "")).strip().upper()
+        candidate_id = self.parse_candidate_id(
+            payload.get("selected_candidate_id", payload.get("selected_id"))
+        )
+        score_by_id = {}
+        rank_by_id = {}
+        for rank, item in enumerate(payload.get("candidate_scores", []), start=1):
+            if not isinstance(item, dict):
+                continue
+            item_id = self.parse_candidate_id(
+                item.get("candidate_id", item.get("id"))
             )
-        )
+            if item_id is None:
+                continue
+            try:
+                score_by_id[item_id] = float(
+                    item.get("score", item.get("semantic_score", 0.0))
+                )
+            except Exception:
+                score_by_id[item_id] = 0.0
+            try:
+                rank_by_id[item_id] = int(item.get("rank", rank))
+            except Exception:
+                rank_by_id[item_id] = rank
 
-    def language_spatial_reference_frame(self) -> str:
         with self.lock:
-            text = f"{self.current_language_command} {self.current_prompt}".lower()
-        image_keywords = (
-            "相机",
-            "图像",
-            "画面",
-            "窗口",
-            "屏幕",
-            "视角",
-            "视野",
-            "camera",
-            "image",
-            "view",
-            "screen",
-            "pixel",
-        )
-        phantom_keywords = (
-            "phantom",
-            "仿体",
-            "体模",
-            "模型",
-        )
-        if any(keyword in text for keyword in image_keywords):
-            return "image"
-        if any(keyword in text for keyword in phantom_keywords):
-            return "phantom"
-        return self.default_spatial_reference_frame
-
-    def language_spatial_target(self):
-        with self.lock:
-            text = f"{self.current_language_command} {self.current_prompt}".lower()
-        if not text.strip():
-            return None
-
-        wants_left = any(word in text for word in ("左", "left"))
-        wants_right = any(word in text for word in ("右", "right"))
-        wants_up = (
-            re.search(r"(左上|右上|上方|上侧|上边|上角|上排|靠上|顶部|顶上)", text)
-            is not None
-            or any(word in text for word in ("upper", "top", "above", "up"))
-        )
-        wants_down = (
-            re.search(r"(左下|右下|下方|下侧|下边|下角|下排|靠下|底部|底下)", text)
-            is not None
-            or any(word in text for word in ("lower", "bottom", "below", "down"))
-        )
-        wants_center = any(
-            word in text
-            for word in ("中心", "中央", "中间", "原孔", "center", "middle")
-        )
-        reference_frame = self.language_spatial_reference_frame()
-
-        if wants_center and not (wants_left or wants_right or wants_up or wants_down):
-            return {
-                "kind": "center",
-                "label": "center",
-                "reference_frame": reference_frame,
-            }
-
-        directions = []
-        if wants_left and not wants_right:
-            directions.append("left")
-        elif wants_right and not wants_left:
-            directions.append("right")
-        if wants_up and not wants_down:
-            directions.append("up")
-        elif wants_down and not wants_up:
-            directions.append("down")
-
-        if not directions:
-            return None
-        return {
-            "kind": "direction",
-            "directions": directions,
-            "label": "+".join(directions),
-            "reference_frame": reference_frame,
-        }
+            self.clear_lock_state(clear_verified_selection=False)
+            self.verified_decision = decision or "UNKNOWN"
+            self.verified_reason = str(payload.get("reason", ""))
+            self.verified_instruction = str(payload.get("instruction", ""))
+            self.verified_candidate_scores = score_by_id
+            self.verified_candidate_ranks = rank_by_id
+            if decision == "ACCEPT" and candidate_id is not None:
+                self.verified_candidate_id = candidate_id
+            else:
+                self.verified_candidate_id = None
+        self.publish_ready(False)
+        if decision == "ACCEPT" and candidate_id is not None:
+            self.publish_status(
+                f"verified selection accepted: H{candidate_id} "
+                f"reason={self.verified_reason}",
+                valid=False,
+            )
+        else:
+            self.publish_status(
+                f"verified selection not accepted: decision={decision or 'UNKNOWN'} "
+                f"reason={self.verified_reason}",
+                valid=False,
+            )
 
     def on_reset(self, msg: Bool):
         if not msg.data:
             return
         with self.lock:
-            self.pose_samples.clear()
-            self.surface_axis_samples.clear()
-            self.locked_point = None
-            self.locked_axis = None
-            self.locked_surface_axis = None
-            self.locked_axis_source = ""
-            self.last_candidates = []
-            self.last_selected_candidate_id = None
-            self.last_filter_note = ""
-            self.last_language_target = "none"
-            self.last_language_reference_frame = "none"
+            self.clear_lock_state(clear_verified_selection=True)
         self.publish_ready(False)
-        self.publish_status("lock reset; waiting for SAM3 port observations")
+        self.publish_status(
+            "lock reset; waiting for candidates and verified selection"
+        )
 
     def publish_ready(self, ready: bool):
         msg = Bool()
@@ -795,8 +752,6 @@ class VlmPortPoseNode(Node):
             candidates = list(self.last_candidates)
             selected_candidate_id = self.last_selected_candidate_id
             filter_note = self.last_filter_note
-            language_target = self.last_language_target
-            language_reference_frame = self.last_language_reference_frame
         if point is None or axis is None:
             return
         self.publish_point(self.pub_locked_point, point)
@@ -808,8 +763,6 @@ class VlmPortPoseNode(Node):
                 candidates,
                 selected_id=selected_candidate_id,
                 filter_note=filter_note,
-                language_target=language_target,
-                language_reference_frame=language_reference_frame,
             )
         self.publish_ready(True)
         surface_text = ""
@@ -823,6 +776,7 @@ class VlmPortPoseNode(Node):
             )
         self.publish_status(
             "locked=true "
+            f"verified=H{selected_candidate_id} "
             f"center=({point[0]:.4f},{point[1]:.4f},{point[2]:.4f}) "
             f"axis=({axis[0]:.3f},{axis[1]:.3f},{axis[2]:.3f}) "
             f"axis_source={axis_source}"
@@ -1334,7 +1288,9 @@ class VlmPortPoseNode(Node):
         if header is None:
             header = info.header if info is not None else None
         if header is not None:
-            self.pub_overlay.publish(bgr_to_image(color, header))
+            overlay_msg = bgr_to_image(color, header)
+            self.pub_overlay.publish(overlay_msg)
+            self.pub_candidate_overlay.publish(overlay_msg)
 
         if self.display_overlay:
             display = color
@@ -1677,169 +1633,110 @@ class VlmPortPoseNode(Node):
             f"gap={max_gap:.3f}m",
         )
 
-    def annotate_selection_scores(
-        self,
-        candidates,
-        score_records,
-        *,
-        source: str,
-        language_target: str = "none",
-        language_reference_frame: str = "none",
-    ):
-        if not score_records:
-            return
-        raw_scores = np.asarray(
-            [float(score) for _candidate, score in score_records],
-            dtype=np.float64,
-        )
-        min_score = float(np.min(raw_scores))
-        max_score = float(np.max(raw_scores))
-        denominator = max(max_score - min_score, 1e-9)
-        normalized_by_id = {
-            int(candidate["id"]): (
+    def annotate_candidate_runtime_fields(self, candidates):
+        with self.lock:
+            latest_score = float(self.latest_score)
+            previous_stability = dict(self.candidate_stability)
+        next_stability = {}
+        current_ids = set()
+
+        for candidate in candidates:
+            candidate_id = int(candidate["id"])
+            current_ids.add(candidate_id)
+            diagnostics = candidate["diagnostics"]
+            circularity = float(diagnostics.get("depth_hole_circularity", 0.0))
+            overlap = float(diagnostics.get("depth_hole_overlap_fraction", 0.0))
+            plane_rms = float(diagnostics.get("plane_rms", 0.0))
+            plane_quality = max(0.0, min(1.0, 1.0 - plane_rms / 0.012))
+            section_quality = (
                 1.0
-                if len(score_records) == 1
-                else (float(score) - min_score) / denominator
+                if int(diagnostics.get("section_center_count", 0))
+                >= self.hole_axis_min_slices
+                else 0.35
             )
-            for candidate, score in score_records
-        }
-        raw_by_id = {
-            int(candidate["id"]): float(score)
-            for candidate, score in score_records
-        }
-        ranked_ids = [
-            int(candidate["id"])
-            for candidate, _score in sorted(
-                score_records,
-                key=lambda item: float(item[1]),
-                reverse=True,
+            geometry_confidence = max(
+                0.0,
+                min(
+                    1.0,
+                    0.35 * circularity
+                    + 0.30 * overlap
+                    + 0.20 * plane_quality
+                    + 0.15 * section_quality,
+                ),
             )
-        ]
-        rank_by_id = {
-            candidate_id: rank
-            for rank, candidate_id in enumerate(ranked_ids, start=1)
-        }
+
+            previous = previous_stability.get(candidate_id)
+            count = 1
+            if previous is not None:
+                previous_point = np.asarray(previous.get("point"), dtype=np.float64)
+                jump = float(np.linalg.norm(candidate["point"] - previous_point))
+                if jump <= max(3.0 * self.max_center_spread_m, 0.015):
+                    count = int(previous.get("count", 0)) + 1
+            temporal_stability = min(1.0, count / max(float(self.stable_frames), 1.0))
+            next_stability[candidate_id] = {
+                "point": candidate["point"].copy(),
+                "count": count,
+            }
+
+            diagnostics["candidate_id"] = f"H{candidate_id}"
+            diagnostics["geometric_validity"] = True
+            diagnostics["geometry_confidence"] = geometry_confidence
+            diagnostics["perception_quality"] = max(
+                0.0,
+                min(1.0, 0.45 * latest_score + 0.55 * geometry_confidence),
+            )
+            diagnostics["temporal_stability"] = temporal_stability
+            diagnostics["visibility"] = 1.0
+            diagnostics["depth_validity"] = 1.0
+            diagnostics["rcm_feasibility"] = 1.0
+            diagnostics["rcm_feasible"] = True
+            diagnostics["rcm_feasibility_source"] = "not_evaluated"
+            diagnostics["ik_margin"] = 0.0
+            diagnostics["ik_feasibility_source"] = "not_evaluated"
+            diagnostics["collision_feasibility"] = 1.0
+            diagnostics["collision_feasible"] = True
+            diagnostics["collision_feasibility_source"] = "not_evaluated"
+            diagnostics["semantic_risk"] = 0.0
+            diagnostics["unknown_space_exposure"] = 0.0
+            diagnostics["overall_acceptance_status"] = "candidate_only"
+
+        with self.lock:
+            self.candidate_stability = {
+                candidate_id: state
+                for candidate_id, state in next_stability.items()
+                if candidate_id in current_ids
+            }
+
+    def annotate_verified_selection_scores(self, candidates):
+        with self.lock:
+            selected_id = self.verified_candidate_id
+            score_by_id = dict(self.verified_candidate_scores)
+            rank_by_id = dict(self.verified_candidate_ranks)
+            decision = self.verified_decision
         for candidate in candidates:
             candidate_id = int(candidate["id"])
             diagnostics = candidate["diagnostics"]
-            if candidate_id not in raw_by_id:
-                diagnostics["selection_score"] = 0.0
-                diagnostics["selection_score_raw"] = -float("inf")
-                diagnostics["selection_rank"] = 0
-                diagnostics["selection_score_source"] = "outside_selection_gate"
-                continue
-            diagnostics["selection_score"] = float(normalized_by_id[candidate_id])
-            diagnostics["selection_score_raw"] = float(raw_by_id[candidate_id])
-            diagnostics["selection_rank"] = int(rank_by_id[candidate_id])
-            diagnostics["selection_score_source"] = str(source)
-            diagnostics["language_target"] = str(language_target)
-            diagnostics["language_reference_frame"] = str(language_reference_frame)
-
-    def select_pose_candidate(self, candidates):
-        spatial_target = self.language_spatial_target()
-        if self.expected_port_max_distance_m > 0.0:
-            candidates = [
-                candidate
-                for candidate in candidates
-                if candidate["diagnostics"]["expected_distance"]
-                <= self.expected_port_max_distance_m
-            ]
-            if not candidates:
-                raise ValueError(
-                    "no candidate inside safety gate after language filtering"
-                )
-
-        if spatial_target is not None:
-            reference_frame = spatial_target.get("reference_frame", "image")
-            if reference_frame == "phantom":
-                coords = np.asarray(
-                    [
-                        [
-                            float(
-                                np.dot(
-                                    candidate["point"],
-                                    self.phantom_left_axis_world,
-                                )
-                            ),
-                            float(
-                                np.dot(
-                                    candidate["point"],
-                                    self.phantom_up_axis_world,
-                                )
-                            ),
-                        ]
-                        for candidate in candidates
-                    ],
-                    dtype=np.float64,
-                )
-                direction_signs = {
-                    "left": (1.0, 0),
-                    "right": (-1.0, 0),
-                    "up": (1.0, 1),
-                    "down": (-1.0, 1),
-                }
-            else:
-                coords = np.asarray(
-                    [candidate["centroid_uv"] for candidate in candidates],
-                    dtype=np.float64,
-                )
-                direction_signs = {
-                    "left": (-1.0, 0),
-                    "right": (1.0, 0),
-                    "up": (-1.0, 1),
-                    "down": (1.0, 1),
-                }
-            center = np.mean(coords, axis=0)
-            span = np.ptp(coords, axis=0)
-            span = np.maximum(span, 1e-6)
-
-            best_candidate = None
-            best_score = -float("inf")
-            score_records = []
-            for index, candidate in enumerate(candidates):
-                rel = (coords[index] - center) / span
-                if spatial_target["kind"] == "center":
-                    score = -float(np.linalg.norm(rel))
-                else:
-                    score = 0.0
-                    for direction in spatial_target["directions"]:
-                        if direction not in direction_signs:
-                            continue
-                        sign, axis_index = direction_signs[direction]
-                        score += sign * float(rel[axis_index])
-                    score += 0.001 * float(candidate["diagnostics"]["hole_area"])
-                score_records.append((candidate, score))
-                if score > best_score:
-                    best_score = score
-                    best_candidate = candidate
-
-            if best_candidate is not None:
-                self.annotate_selection_scores(
-                    candidates,
-                    score_records,
-                    source="language_spatial",
-                    language_target=spatial_target["label"],
-                    language_reference_frame=reference_frame,
-                )
-                best_candidate["diagnostics"]["language_score"] = best_score
-                return best_candidate
-
-        score_records = [
-            (
-                candidate,
-                float(candidate["diagnostics"]["hole_area"]),
+            score = score_by_id.get(candidate_id)
+            diagnostics["selection_score"] = 0.0 if score is None else float(score)
+            diagnostics["selection_score_raw"] = None if score is None else float(score)
+            diagnostics["selection_rank"] = int(rank_by_id.get(candidate_id, 0))
+            diagnostics["selection_score_source"] = (
+                "semantic_grounder"
+                if score is not None
+                else "unscored_candidate"
             )
-            for candidate in candidates
-        ]
-        self.annotate_selection_scores(
-            candidates,
-            score_records,
-            source="hole_area_fallback",
-        )
-        return max(
-            candidates,
-            key=lambda item: item["diagnostics"]["selection_score_raw"],
-        )
+            if decision == "ACCEPT" and candidate_id == selected_id:
+                diagnostics["overall_acceptance_status"] = "verified_selected"
+
+    def select_verified_candidate(self, candidates):
+        with self.lock:
+            selected_id = self.verified_candidate_id
+        if selected_id is None:
+            return None
+        for candidate in candidates:
+            if int(candidate["id"]) == int(selected_id):
+                return candidate
+        return None
 
     def publish_candidates(
         self,
@@ -1848,18 +1745,36 @@ class VlmPortPoseNode(Node):
         raw_count=None,
         filter_note="",
         selected_id=None,
-        language_target="none",
-        language_reference_frame="none",
+        image_shape=None,
     ):
+        with self.lock:
+            verified_candidate_id = self.verified_candidate_id
+            verified_decision = self.verified_decision
+            verified_reason = self.verified_reason
+            verified_instruction = self.verified_instruction
+        image_size = None
+        if image_shape is not None and len(image_shape) >= 2:
+            image_size = [int(image_shape[1]), int(image_shape[0])]
         payload = {
+            "schema_version": "dynamic_rcm_port_candidates.v2",
             "frame_id": self.target_frame,
             "stamp_sec": self.get_clock().now().nanoseconds * 1e-9,
             "raw_count": len(candidates) if raw_count is None else int(raw_count),
             "count": len(candidates),
             "filter": filter_note,
             "selected_id": None if selected_id is None else int(selected_id),
-            "language_target": str(language_target),
-            "language_reference_frame": str(language_reference_frame),
+            "image_size": image_size,
+            "verified_selection": {
+                "decision": verified_decision,
+                "candidate_id": (
+                    None
+                    if verified_candidate_id is None
+                    else f"H{int(verified_candidate_id)}"
+                ),
+                "selected_id": verified_candidate_id,
+                "reason": verified_reason,
+                "instruction": verified_instruction,
+            },
             "holes": [],
         }
         for candidate in candidates:
@@ -1890,6 +1805,7 @@ class VlmPortPoseNode(Node):
             payload["holes"].append(
                 {
                     "id": int(candidate["id"]),
+                    "candidate_id": f"H{int(candidate['id'])}",
                     "center_px": [
                         float(candidate["centroid_uv"][0]),
                         float(candidate["centroid_uv"][1]),
@@ -2014,6 +1930,59 @@ class VlmPortPoseNode(Node):
                         diagnostics["expected_distance"]
                     ),
                     "axis_source": str(diagnostics["axis_source"]),
+                    "geometry_confidence": float(
+                        diagnostics.get("geometry_confidence", 0.0)
+                    ),
+                    "perception_quality": float(
+                        diagnostics.get("perception_quality", 0.0)
+                    ),
+                    "geometric_validity": bool(
+                        diagnostics.get("geometric_validity", True)
+                    ),
+                    "temporal_stability": float(
+                        diagnostics.get("temporal_stability", 0.0)
+                    ),
+                    "visibility": float(diagnostics.get("visibility", 1.0)),
+                    "depth_validity": float(
+                        diagnostics.get("depth_validity", 1.0)
+                    ),
+                    "rcm_feasibility": float(
+                        diagnostics.get("rcm_feasibility", 1.0)
+                    ),
+                    "rcm_feasible": bool(
+                        diagnostics.get("rcm_feasible", True)
+                    ),
+                    "rcm_feasibility_source": str(
+                        diagnostics.get("rcm_feasibility_source", "not_evaluated")
+                    ),
+                    "ik_margin": float(diagnostics.get("ik_margin", 0.0)),
+                    "ik_feasibility_source": str(
+                        diagnostics.get("ik_feasibility_source", "not_evaluated")
+                    ),
+                    "collision_feasibility": float(
+                        diagnostics.get("collision_feasibility", 1.0)
+                    ),
+                    "collision_feasible": bool(
+                        diagnostics.get("collision_feasible", True)
+                    ),
+                    "collision_feasibility_source": str(
+                        diagnostics.get(
+                            "collision_feasibility_source",
+                            "not_evaluated",
+                        )
+                    ),
+                    "semantic_risk": float(
+                        diagnostics.get("semantic_risk", 0.0)
+                    ),
+                    "unknown_space_exposure": float(
+                        diagnostics.get("unknown_space_exposure", 0.0)
+                    ),
+                    "overall_acceptance_status": str(
+                        diagnostics.get(
+                            "overall_acceptance_status",
+                            "candidate_only",
+                        )
+                    ),
                     "selection_score": float(
                         diagnostics.get("selection_score", 0.0)
                     ),
@@ -2030,6 +1999,7 @@ class VlmPortPoseNode(Node):
         msg = String()
         msg.data = json.dumps(payload, separators=(",", ":"))
         self.pub_candidates.publish(msg)
+        self.pub_candidates_alias.publish(msg)
 
     def update_lock(self, point, axis, diagnostics):
         surface_axis = normalize(
@@ -2085,8 +2055,8 @@ class VlmPortPoseNode(Node):
             f"candidates={diagnostics.get('candidate_count', '?')} "
             f"rejected={diagnostics.get('rejected_count', '?')} "
             f"{diagnostics.get('filter_note', '')} "
-            f"language={diagnostics.get('language_target', 'none')} "
-            f"reference={diagnostics.get('language_reference_frame', 'none')} "
+            f"verified_decision={self.verified_decision} "
+            f"verified_reason={self.verified_reason} "
             f"score={diagnostics.get('selection_score', 0.0):.3f} "
             f"rank={diagnostics.get('selection_rank', 0)} "
             f"geom_offset={diagnostics.get('depth_hole_center_offset_px', 0.0):.1f}px "
@@ -2196,17 +2166,66 @@ class VlmPortPoseNode(Node):
             candidates, rejected = self.estimate_pose_candidates(mask, depth, info)
             raw_candidate_count = len(candidates)
             filter_note = ""
-            if self.language_requests_phantom_surface():
-                candidates, filter_note = self.filter_candidates_to_phantom_surface(
-                    candidates
+            if self.expected_port_max_distance_m > 0.0:
+                before_count = len(candidates)
+                candidates = [
+                    candidate
+                    for candidate in candidates
+                    if candidate["diagnostics"]["expected_distance"]
+                    <= self.expected_port_max_distance_m
+                ]
+                filter_note = (
+                    "workspace_gate "
+                    f"raw={before_count} kept={len(candidates)} "
+                    f"radius={self.expected_port_max_distance_m:.3f}m"
                 )
+                if not candidates:
+                    raise ValueError("no candidate inside configured workspace gate")
+            self.annotate_candidate_runtime_fields(candidates)
+            self.annotate_verified_selection_scores(candidates)
+            selected = self.select_verified_candidate(candidates)
+            if selected is not None:
+                selected_candidate_id = int(selected["id"])
+            with self.lock:
+                self.last_candidates = list(candidates)
+                self.last_selected_candidate_id = selected_candidate_id
+                self.last_filter_note = filter_note
             self.publish_candidates(
                 candidates,
                 raw_count=raw_candidate_count,
                 filter_note=filter_note,
+                selected_id=selected_candidate_id,
+                image_shape=mask.shape,
             )
-            selected = self.select_pose_candidate(candidates)
-            selected_candidate_id = int(selected["id"])
+            if selected is None:
+                with self.lock:
+                    requested_id = self.verified_candidate_id
+                    decision = self.verified_decision
+                    reason = self.verified_reason
+                if requested_id is None:
+                    status = (
+                        f"candidates={len(candidates)} "
+                        "waiting_for_verified_selection"
+                    )
+                else:
+                    status = (
+                        f"verified H{requested_id} not visible; "
+                        f"candidates={len(candidates)} decision={decision} "
+                        f"reason={reason}"
+                    )
+                self.pose_samples.clear()
+                self.surface_axis_samples.clear()
+                self.publish_ready(False)
+                self.publish_status(status, valid=False)
+                self.publish_overlay(
+                    mask,
+                    info,
+                    candidates=candidates,
+                    selected_candidate_id=selected_candidate_id,
+                    status=status,
+                    locked=False,
+                )
+                return
             point = selected["point"]
             axis = selected["axis"]
             diagnostics = dict(selected["diagnostics"])
@@ -2219,29 +2238,6 @@ class VlmPortPoseNode(Node):
             diagnostics["rejected_count"] = rejected
             diagnostics["selected_id"] = selected_candidate_id
             diagnostics["filter_note"] = filter_note
-            with self.lock:
-                self.last_candidates = list(candidates)
-                self.last_selected_candidate_id = selected_candidate_id
-                self.last_filter_note = filter_note
-                self.last_language_target = diagnostics.get(
-                    "language_target",
-                    "none",
-                )
-                self.last_language_reference_frame = diagnostics.get(
-                    "language_reference_frame",
-                    "none",
-                )
-            self.publish_candidates(
-                candidates,
-                raw_count=raw_candidate_count,
-                filter_note=filter_note,
-                selected_id=selected_candidate_id,
-                language_target=diagnostics.get("language_target", "none"),
-                language_reference_frame=diagnostics.get(
-                    "language_reference_frame",
-                    "none",
-                ),
-            )
         except Exception as exc:
             self.pose_samples.clear()
             self.publish_status(f"port estimate rejected: {exc}", valid=False)

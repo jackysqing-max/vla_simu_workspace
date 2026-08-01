@@ -70,7 +70,7 @@ def pretty_print_plan(task: str, plan_text: str):
     print("\n================ USER TASK ================", flush=True)
     print(task, flush=True)
 
-    print("\n================ PLAN JSON ================", flush=True)
+    print("\n================ TASK JSON ================", flush=True)
     try:
         plan = json.loads(plan_text)
     except json.JSONDecodeError:
@@ -79,8 +79,35 @@ def pretty_print_plan(task: str, plan_text: str):
 
     print(json.dumps(plan, ensure_ascii=False, indent=2), flush=True)
 
-    print("\n========== TARGET_PROMPT HANDOFF ==========", flush=True)
     steps = plan.get("steps", [])
+    if not steps and "terminal_operation" in plan:
+        print("\n========== SEMANTIC GROUNDING HANDOFF ==========", flush=True)
+        print(
+            "instruction -> /vlm_rcm/language_command: "
+            f"\"{plan.get('instruction', '')}\"",
+            flush=True,
+        )
+        print(
+            "terminal_operation -> deterministic executor: "
+            f"{plan.get('terminal_operation', '')}",
+            flush=True,
+        )
+        print(
+            "The semantic grounder will select a dynamic candidate ID from "
+            "the marked camera image plus /vlm_rcm/hole_candidates.",
+            flush=True,
+        )
+        print("\n============ EXECUTION MEANING ============", flush=True)
+        print(
+            "The LLM emits a high-level RCM task request only. Qwen-VL grounds "
+            "the requested port against visible candidates, the verifier returns "
+            "ACCEPT / REQUERY / REJECT, and the executor then runs fixed safety "
+            "primitives internally.",
+            flush=True,
+        )
+        return
+
+    print("\n========== TARGET_PROMPT HANDOFF ==========", flush=True)
     for step in steps:
         index = step.get("step_index", "?")
         action = step.get("action", "")

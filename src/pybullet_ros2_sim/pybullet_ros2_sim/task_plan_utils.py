@@ -15,6 +15,14 @@ SURGICAL_RCM_ACTIONS = (
     "establish_rcm",
     "execute_rcm_circle",
 )
+SURGICAL_RCM_TERMINAL_OPERATIONS = (
+    "localize_only",
+    "establish_rcm",
+    "execute_rcm_circle",
+    "hold",
+    "retract",
+    "stop",
+)
 SURGICAL_RCM_STEP_DEFAULTS = {
     "localize_rcm_port": {
         "description": "Locate and lock the circular port center and insertion axis.",
@@ -97,7 +105,7 @@ PLAN_JSON_SCHEMA = {
     "additionalProperties": False,
 }
 
-SURGICAL_RCM_PLAN_JSON_SCHEMA = {
+LEGACY_SURGICAL_RCM_PLAN_JSON_SCHEMA = {
     "type": "object",
     "properties": {
         "task_summary": {"type": "string"},
@@ -122,6 +130,37 @@ SURGICAL_RCM_PLAN_JSON_SCHEMA = {
         },
     },
     "required": ["task_summary", "planning_notes", "steps"],
+    "additionalProperties": False,
+}
+
+SURGICAL_RCM_TASK_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "instruction": {"type": "string"},
+        "objective_text": {"type": "string"},
+        "selected_candidate_id": {"type": ["string", "null"]},
+        "exclusions": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "allow_alternative": {"type": "boolean"},
+        "terminal_operation": {
+            "type": "string",
+            "enum": list(SURGICAL_RCM_TERMINAL_OPERATIONS),
+        },
+        "requested_insertion_depth_m": {"type": "number"},
+        "approach_preference": {"type": "string"},
+        "verification": {
+            "type": "object",
+            "additionalProperties": True,
+        },
+    },
+    "required": [
+        "instruction",
+        "objective_text",
+        "allow_alternative",
+        "terminal_operation",
+    ],
     "additionalProperties": False,
 }
 
@@ -395,6 +434,75 @@ def _positive_or_default(value, default: float) -> float:
     if value == 0.0 and default > 0.0:
         return default
     return value
+
+
+def _normalize_terminal_operation(value: str) -> str:
+    operation = str(value or "").strip().lower()
+    aliases = {
+        "localize": "localize_only",
+        "localize_rcm_port": "localize_only",
+        "locate": "localize_only",
+        "establish": "establish_rcm",
+        "align_tool_axis": "establish_rcm",
+        "execute": "execute_rcm_circle",
+        "execute_circle": "execute_rcm_circle",
+        "execute_rcm": "execute_rcm_circle",
+        "execute_rcm_trajectory": "execute_rcm_circle",
+        "circle": "execute_rcm_circle",
+        "execute_rcm_circle": "execute_rcm_circle",
+        "hold": "hold",
+        "retract": "retract",
+        "stop": "stop",
+    }
+    operation = aliases.get(operation, operation)
+    if operation not in SURGICAL_RCM_TERMINAL_OPERATIONS:
+        return "execute_rcm_circle"
+    return operation
+
+
+def sanitize_rcm_task_request(raw_task: dict, *, fallback_instruction: str = "") -> dict:
+    """Normalize an open semantic RCM request without expanding it into stages."""
+    task = raw_task if isinstance(raw_task, dict) else {}
+    instruction = str(
+        task.get(
+            "instruction",
+            task.get("original_instruction", task.get("task_summary", fallback_instruction)),
+        )
+    ).strip()
+    objective_text = str(task.get("objective_text", instruction)).strip() or instruction
+    exclusions = task.get("exclusions", [])
+    if not isinstance(exclusions, list):
+        exclusions = []
+    verification = task.get("verification", {})
+    if not isinstance(verification, dict):
+        verification = {}
+    selected_candidate_id = task.get("selected_candidate_id", None)
+    if selected_candidate_id is not None:
+        selected_candidate_id = str(selected_candidate_id).strip() or None
+    return {
+        "instruction": instruction,
+        "objective_text": objective_text,
+        "selected_candidate_id": selected_candidate_id,
+        "exclusions": [str(item).strip() for item in exclusions if str(item).strip()],
+        "allow_alternative": bool(task.get("allow_alternative", False)),
+        "terminal_operation": _normalize_terminal_operation(
+            task.get("terminal_operation", "execute_rcm_circle")
+        ),
+        "requested_insertion_depth_m": _positive_float(
+            task.get("requested_insertion_depth_m", 0.0),
+            0.0,
+        ),
+        "approach_preference": str(task.get("approach_preference", "")).strip(),
+        "verification": verification,
+    }
+
+
+def rcm_task_request_to_json(task: dict) -> str:
+    return json.dumps(sanitize_rcm_task_request(task), ensure_ascii=False)
+
+
+def rcm_task_request_from_json(text: str) -> dict:
+    return sanitize_rcm_task_request(json.loads(text))
 
 
 def _canonicalize_surgical_rcm_steps(steps: list[dict]) -> list[dict]:
@@ -795,38 +903,22 @@ def _infer_surgical_rcm_plan_from_instruction(
 ) -> dict:
     text = (instruction_text or "").strip()
     if not text:
-        return {
-            "task_summary": "RCM constrained port task",
-            "planning_notes": "The instruction was empty.",
-            "steps": [],
-        }
-    return sanitize_plan(
+        return sanitize_rcm_task_request(
+            {
+                "instruction": "",
+                "objective_text": "",
+                "terminal_operation": "stop",
+                "verification": {"decision": "REJECT", "reason": "empty_instruction"},
+            }
+        )
+    return sanitize_rcm_task_request(
         {
-            "task_summary": text,
-            "planning_notes": (
-                "Generated locally as a safety-ordered RCM port sequence. "
-                "Perception locks the port pose before any robot motion."
-            ),
-            "steps": [
-                {
-                    "step_index": index,
-                    "action": action,
-                    "target_prompt": (
-                        text
-                        if action != "execute_rcm_circle"
-                        else ""
-                    ),
-                    "description": (
-                        f"{action} for {text}"
-                        if action != "execute_rcm_circle"
-                        else "execute RCM circular trajectory"
-                    ),
-                }
-                for index, action in enumerate(SURGICAL_RCM_ACTIONS, start=1)
-            ],
-        },
-        allow_open_vocabulary=True,
-        allow_rcm_actions=True,
+            "instruction": text,
+            "objective_text": text,
+            "allow_alternative": False,
+            "terminal_operation": "execute_rcm_circle",
+            "verification": {"decision": "PENDING"},
+        }
     )
 
 
@@ -902,6 +994,8 @@ def plan_from_json(
     allow_grasp_actions: bool = False,
     allow_rcm_actions: bool = False,
 ) -> dict:
+    if allow_rcm_actions:
+        return rcm_task_request_from_json(text)
     return sanitize_plan(
         json.loads(text),
         allow_open_vocabulary=allow_open_vocabulary,

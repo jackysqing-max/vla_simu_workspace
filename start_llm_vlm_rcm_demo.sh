@@ -8,10 +8,10 @@ PID_DIR="$WS/run_pids"
 MODE_FILE="$PID_DIR/llm_vlm_rcm_mode.txt"
 
 LLM_BACKEND="${LLM_BACKEND:-qwen3_local}"
-GPU_EXECUTION_MODE="${GPU_EXECUTION_MODE:-staged_single_gpu}"
+GPU_EXECUTION_MODE="${GPU_EXECUTION_MODE:-online_qwen_vl}"
 QWEN3_AUTO_START="${QWEN3_AUTO_START:-true}"
 QWEN3_VENV="${QWEN3_VENV:-$WORKSPACE_PARENT/.venvs/qwen3-vllm}"
-QWEN_MODEL="${QWEN_MODEL:-Qwen/Qwen3-4B}"
+QWEN_MODEL="${QWEN_MODEL:-Qwen/Qwen3-VL-4B-Instruct}"
 QWEN3_PORT="${QWEN3_PORT:-8000}"
 QWEN3_READY_TIMEOUT_SEC="${QWEN3_READY_TIMEOUT_SEC:-240}"
 QWEN3_GPU_MEMORY_UTILIZATION="${QWEN3_GPU_MEMORY_UTILIZATION:-0.60}"
@@ -213,6 +213,10 @@ ensure_planning_nodes() {
 }
 
 start_execution_runtime() {
+  QWEN_VL_MODEL="$QWEN_MODEL" \
+  QWEN_VL_API_BASE_URL="http://127.0.0.1:$QWEN3_PORT/v1/chat/completions" \
+  QWEN_VL_API_KEY="EMPTY" \
+  VLM_RCM_START_SEMANTIC_GROUNDER=true \
   VLM_RCM_SHOW_TOOL=true \
   VLM_RCM_SHOW_DVRK_LND=true \
   VLM_RCM_TOOL_LENGTH_M="$RCM_TOOL_LENGTH_M" \
@@ -311,9 +315,10 @@ case "${1:-start}" in
       echo "After planning, Qwen3 will stop and the SAM3/RCM runtime will start automatically."
     fi
     echo
-    echo "Monitor:"
-    echo "  ros2 topic echo /llm_task/plan_json"
-    echo "  ros2 topic echo /surgical_rcm/status"
+	    echo "Monitor:"
+	    echo "  ros2 topic echo /llm_task/plan_json"
+	    echo "  ros2 topic echo /vlm_rcm/verification_result"
+	    echo "  ros2 topic echo /surgical_rcm/status"
     echo "  ros2 topic echo /rcm_virtual_fixtures/stage"
     ;;
   task)

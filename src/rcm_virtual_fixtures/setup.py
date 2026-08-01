@@ -37,6 +37,7 @@ setup(
         "console_scripts": [
             "rcm_virtual_fixture_node = rcm_virtual_fixtures.rcm_virtual_fixture_node:main",
             "vlm_port_pose_node = rcm_virtual_fixtures.vlm_port_pose_node:main",
+            "semantic_port_grounder_node = rcm_virtual_fixtures.semantic_port_grounder_node:main",
             "surgical_rcm_task_executor_node = rcm_virtual_fixtures.surgical_rcm_task_executor_node:main",
         ],
     },
