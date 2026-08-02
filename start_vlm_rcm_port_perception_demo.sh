@@ -7,7 +7,7 @@ PID_DIR="$WS/run_pids"
 
 SAM3_VENV="${SAM3_VENV:-$HOME/venvs/ros_vla}"
 SAM3_DEVICE="${SAM3_DEVICE:-cuda}"
-SAM3_PROMPT="${SAM3_PROMPT:-circular hole}"
+SAM3_PROMPT="${SAM3_PROMPT:-}"
 SAM3_INFER_HZ="${SAM3_INFER_HZ:-1.0}"
 SAM3_MAX_SIDE="${SAM3_MAX_SIDE:-640}"
 SAM3_SCORE_TH="${SAM3_SCORE_TH:-0.05}"
@@ -36,7 +36,9 @@ QWEN3_PORT="${QWEN3_PORT:-8000}"
 QWEN_VL_MODEL="${QWEN_VL_MODEL:-${QWEN_MODEL:-Qwen/Qwen3-VL-4B-Instruct}}"
 QWEN_VL_API_BASE_URL="${QWEN_VL_API_BASE_URL:-http://127.0.0.1:${QWEN3_PORT}/v1/chat/completions}"
 QWEN_VL_API_KEY="${QWEN_VL_API_KEY:-EMPTY}"
-QWEN_VL_EXTRA_REQUEST_BODY_JSON="${QWEN_VL_EXTRA_REQUEST_BODY_JSON:-{\"top_k\":20,\"chat_template_kwargs\":{\"enable_thinking\":false}}}"
+QWEN_VL_INPUT_MODE="${QWEN_VL_INPUT_MODE:-auto}"
+QWEN_VL_ENABLE_LOCAL_FALLBACK="${QWEN_VL_ENABLE_LOCAL_FALLBACK:-true}"
+QWEN_VL_RETRY_TEXT_WITHOUT_IMAGES="${QWEN_VL_RETRY_TEXT_WITHOUT_IMAGES:-true}"
 
 PHANTOM_MESH="${PHANTOM_MESH:-$WS/install/rcm_virtual_fixtures/share/rcm_virtual_fixtures/meshes/phantom_multi.STL}"
 if [[ ! -f "$PHANTOM_MESH" ]]; then
@@ -234,8 +236,10 @@ case "${1:-start}" in
        -p hole_search_radius_px:=40 \
        -p hole_min_depth_m:=0.025 \
        -p hole_min_area_px:=80 \
-       -p min_mask_area_px:=25 \
-       -p min_score:=0.03 \
+	       -p min_mask_area_px:=25 \
+	       -p min_score:=0.03 \
+	       -p language_instruction_topic:=/vlm_rcm/language_command \
+	       -p require_language_instruction:=true \
 	       -p stable_frames:=3 \
 	       -p stability_window:=5 \
 	       -p max_center_spread_m:=0.006 \
@@ -254,7 +258,12 @@ case "${1:-start}" in
 	         -p top_p:=1.0 \
 	         -p max_output_tokens:=768 \
 	         -p request_timeout_sec:=90.0 \
-	         -p extra_request_body_json:='$QWEN_VL_EXTRA_REQUEST_BODY_JSON' \
+	         -p input_mode:='$QWEN_VL_INPUT_MODE' \
+	         -p enable_local_fallback:=$QWEN_VL_ENABLE_LOCAL_FALLBACK \
+	         -p retry_text_without_images:=$QWEN_VL_RETRY_TEXT_WITHOUT_IMAGES \
+	         -p sam_prompt_topic:=/sam3/prompt \
+	         -p publish_sam_prompt_on_instruction:=true \
+	         -p require_post_instruction_candidates:=true \
 	         -p require_scoring_program:=true \
 	         -p min_model_margin:=0.08 \
 	         -p min_expression_margin:=0.000001"
@@ -264,8 +273,13 @@ case "${1:-start}" in
 
 	    echo
 	    echo "[OK] SAM3 VLM-RCM port perception demo started."
-	    echo "     prompt: $SAM3_PROMPT"
+	    if [[ -n "$SAM3_PROMPT" ]]; then
+	      echo "     startup prompt: $SAM3_PROMPT"
+	    else
+	      echo "     startup prompt: <idle until language instruction>"
+	    fi
 	    echo "     semantic grounder: $VLM_RCM_START_SEMANTIC_GROUNDER model=$QWEN_VL_MODEL"
+	    echo "     semantic input: $QWEN_VL_INPUT_MODE, local fallback: $QWEN_VL_ENABLE_LOCAL_FALLBACK"
 	    echo "     PyBullet: yellow sphere = exact locked point; green spheres = candidates; cyan arrow = inward axis"
 	    echo "     Camera window: green = SAM3 mask, IDs = dynamic candidates"
 	    echo
@@ -273,6 +287,7 @@ case "${1:-start}" in
 	    echo "  ros2 topic echo /vlm_rcm/status"
 	    echo "  ros2 topic echo /vlm_rcm/semantic_status"
 	    echo "  ros2 topic echo /vlm_rcm/verification_result"
+	    echo "  ros2 topic echo /vlm_rcm/axis_latency"
 	    echo "  ros2 topic echo /vlm_rcm/locked_port_point"
 	    echo "  ros2 topic echo /vlm_rcm/locked_port_axis"
 	    echo "  ros2 topic echo /vlm_rcm/locked_surface_axis"

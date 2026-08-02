@@ -148,12 +148,13 @@ class LocateCapture(Node):
 
         deadline = time.time() + max(repeat_sec, 0.0)
         self.pub_reset.publish(reset_msg)
-        self.pub_prompt.publish(prompt_msg)
+        if prompt:
+            self.pub_prompt.publish(prompt_msg)
         self.pub_language.publish(language_msg)
         while time.time() < deadline:
             time.sleep(0.2)
-            self.pub_reset.publish(reset_msg)
-            self.pub_prompt.publish(prompt_msg)
+            if prompt:
+                self.pub_prompt.publish(prompt_msg)
             self.pub_language.publish(language_msg)
 
 

@@ -234,11 +234,14 @@ class VlmPortPoseNode(Node):
             "locked_surface_axis_topic",
             "/vlm_rcm/locked_surface_axis",
         )
+        self.declare_parameter("axis_latency_topic", "/vlm_rcm/axis_latency")
         self.declare_parameter("valid_topic", "/vlm_rcm/port_valid")
         self.declare_parameter("ready_topic", "/vlm_rcm/port_ready")
         self.declare_parameter("status_topic", "/vlm_rcm/status")
         self.declare_parameter("candidate_topic", "/vlm_rcm/hole_candidates")
         self.declare_parameter("candidate_alias_topic", "/vlm_rcm/candidates")
+        self.declare_parameter("language_instruction_topic", "/vlm_rcm/language_command")
+        self.declare_parameter("require_language_instruction", True)
         self.declare_parameter(
             "verified_selection_topic",
             "/vlm_rcm/verified_selected_port",
@@ -264,6 +267,12 @@ class VlmPortPoseNode(Node):
         )
         self.score_topic = str(self.get_parameter("score_topic").value)
         self.prompt_topic = str(self.get_parameter("prompt_topic").value)
+        self.language_instruction_topic = str(
+            self.get_parameter("language_instruction_topic").value
+        )
+        self.require_language_instruction = bool(
+            self.get_parameter("require_language_instruction").value
+        )
         self.target_frame = str(self.get_parameter("target_frame").value)
         self.min_score = float(self.get_parameter("min_score").value)
         self.min_mask_area_px = max(
@@ -446,6 +455,12 @@ class VlmPortPoseNode(Node):
         self.create_subscription(String, self.prompt_topic, self.on_prompt, 10)
         self.create_subscription(
             String,
+            self.language_instruction_topic,
+            self.on_language_instruction,
+            10,
+        )
+        self.create_subscription(
+            String,
             self.verified_selection_topic,
             self.on_verified_selection,
             qos_latched,
@@ -485,6 +500,11 @@ class VlmPortPoseNode(Node):
         self.pub_locked_surface_axis = self.create_publisher(
             Vector3Stamped,
             str(self.get_parameter("locked_surface_axis_topic").value),
+            qos_latched,
+        )
+        self.pub_axis_latency = self.create_publisher(
+            String,
+            str(self.get_parameter("axis_latency_topic").value),
             qos_latched,
         )
         self.pub_valid = self.create_publisher(
@@ -542,10 +562,19 @@ class VlmPortPoseNode(Node):
         self.last_candidates = []
         self.last_selected_candidate_id = None
         self.last_filter_note = ""
+        self.language_detection_armed = not self.require_language_instruction
+        self.language_instruction = ""
+        self.language_instruction_wall_time_sec = 0.0
         self.verified_candidate_id = None
         self.verified_instruction = ""
         self.verified_reason = ""
         self.verified_decision = "NONE"
+        self.verified_request_id = None
+        self.verified_instruction_received_wall_time_sec = 0.0
+        self.verified_instruction_received_ros_stamp_sec = 0.0
+        self.verified_semantic_completed_wall_time_sec = 0.0
+        self.verified_semantic_latency_sec = 0.0
+        self.axis_latency_reported_request_id = None
         self.verified_candidate_scores = {}
         self.verified_candidate_ranks = {}
         self.candidate_stability = {}
@@ -583,7 +612,12 @@ class VlmPortPoseNode(Node):
         with self.lock:
             self.latest_info = msg
 
-    def clear_lock_state(self, *, clear_verified_selection: bool = False):
+    def clear_lock_state(
+        self,
+        *,
+        clear_verified_selection: bool = False,
+        clear_language_instruction: bool = False,
+    ):
         self.pose_samples.clear()
         self.surface_axis_samples.clear()
         self.locked_point = None
@@ -593,11 +627,21 @@ class VlmPortPoseNode(Node):
         self.last_candidates = []
         self.last_selected_candidate_id = None
         self.last_filter_note = ""
+        if clear_language_instruction:
+            self.language_detection_armed = not self.require_language_instruction
+            self.language_instruction = ""
+            self.language_instruction_wall_time_sec = 0.0
         if clear_verified_selection:
             self.verified_candidate_id = None
             self.verified_instruction = ""
             self.verified_reason = ""
             self.verified_decision = "NONE"
+            self.verified_request_id = None
+            self.verified_instruction_received_wall_time_sec = 0.0
+            self.verified_instruction_received_ros_stamp_sec = 0.0
+            self.verified_semantic_completed_wall_time_sec = 0.0
+            self.verified_semantic_latency_sec = 0.0
+            self.axis_latency_reported_request_id = None
             self.verified_candidate_scores = {}
             self.verified_candidate_ranks = {}
 
@@ -612,6 +656,25 @@ class VlmPortPoseNode(Node):
                 self.clear_lock_state(clear_verified_selection=True)
                 self.publish_ready(False)
             self.current_prompt = prompt
+
+    def on_language_instruction(self, msg: String):
+        instruction = str(msg.data or "").strip()
+        if not instruction:
+            return
+        with self.lock:
+            self.clear_lock_state(
+                clear_verified_selection=True,
+                clear_language_instruction=False,
+            )
+            self.language_detection_armed = True
+            self.language_instruction = instruction
+            self.language_instruction_wall_time_sec = time.time()
+        self.publish_ready(False)
+        self.publish_status(
+            "language_instruction_armed_detection: "
+            f"{instruction}",
+            valid=False,
+        )
 
     @staticmethod
     def parse_candidate_id(value):
@@ -665,6 +728,32 @@ class VlmPortPoseNode(Node):
             self.verified_decision = decision or "UNKNOWN"
             self.verified_reason = str(payload.get("reason", ""))
             self.verified_instruction = str(payload.get("instruction", ""))
+            self.verified_request_id = payload.get("request_id", None)
+            try:
+                self.verified_instruction_received_wall_time_sec = float(
+                    payload.get("instruction_received_wall_time_sec", 0.0)
+                )
+            except Exception:
+                self.verified_instruction_received_wall_time_sec = 0.0
+            try:
+                self.verified_instruction_received_ros_stamp_sec = float(
+                    payload.get("instruction_received_ros_stamp_sec", 0.0)
+                )
+            except Exception:
+                self.verified_instruction_received_ros_stamp_sec = 0.0
+            try:
+                self.verified_semantic_completed_wall_time_sec = float(
+                    payload.get("semantic_completed_wall_time_sec", 0.0)
+                )
+            except Exception:
+                self.verified_semantic_completed_wall_time_sec = 0.0
+            try:
+                self.verified_semantic_latency_sec = float(
+                    payload.get("semantic_latency_sec", 0.0)
+                )
+            except Exception:
+                self.verified_semantic_latency_sec = 0.0
+            self.axis_latency_reported_request_id = None
             self.verified_candidate_scores = score_by_id
             self.verified_candidate_ranks = rank_by_id
             if decision == "ACCEPT" and candidate_id is not None:
@@ -675,7 +764,8 @@ class VlmPortPoseNode(Node):
         if decision == "ACCEPT" and candidate_id is not None:
             self.publish_status(
                 f"verified selection accepted: H{candidate_id} "
-                f"reason={self.verified_reason}",
+                f"reason={self.verified_reason} "
+                f"semantic_latency={self.verified_semantic_latency_sec:.3f}s",
                 valid=False,
             )
         else:
@@ -689,10 +779,13 @@ class VlmPortPoseNode(Node):
         if not msg.data:
             return
         with self.lock:
-            self.clear_lock_state(clear_verified_selection=True)
+            self.clear_lock_state(
+                clear_verified_selection=True,
+                clear_language_instruction=True,
+            )
         self.publish_ready(False)
         self.publish_status(
-            "lock reset; waiting for candidates and verified selection"
+            "lock reset; waiting for language instruction"
         )
 
     def publish_ready(self, ready: bool):
@@ -1752,6 +1845,8 @@ class VlmPortPoseNode(Node):
             verified_decision = self.verified_decision
             verified_reason = self.verified_reason
             verified_instruction = self.verified_instruction
+            language_detection_armed = self.language_detection_armed
+            language_instruction = self.language_instruction
         image_size = None
         if image_shape is not None and len(image_shape) >= 2:
             image_size = [int(image_shape[1]), int(image_shape[0])]
@@ -1762,6 +1857,8 @@ class VlmPortPoseNode(Node):
             "raw_count": len(candidates) if raw_count is None else int(raw_count),
             "count": len(candidates),
             "filter": filter_note,
+            "language_triggered": bool(language_detection_armed),
+            "language_instruction": language_instruction,
             "selected_id": None if selected_id is None else int(selected_id),
             "image_size": image_size,
             "verified_selection": {
@@ -2001,6 +2098,109 @@ class VlmPortPoseNode(Node):
         self.pub_candidates.publish(msg)
         self.pub_candidates_alias.publish(msg)
 
+    def publish_axis_latency_record(self, point, axis, surface_axis, diagnostics):
+        axis_acquired_wall_time_sec = time.time()
+        axis_acquired_ros_stamp_sec = self.get_clock().now().nanoseconds * 1e-9
+        request_id = self.verified_request_id
+        already_reported = (
+            request_id is not None
+            and self.axis_latency_reported_request_id == request_id
+        )
+        if already_reported:
+            return
+
+        instruction_received_wall_time_sec = (
+            self.verified_instruction_received_wall_time_sec
+        )
+        semantic_completed_wall_time_sec = (
+            self.verified_semantic_completed_wall_time_sec
+        )
+        axis_latency_sec = None
+        verification_to_axis_latency_sec = None
+        if instruction_received_wall_time_sec > 0.0:
+            axis_latency_sec = max(
+                0.0,
+                axis_acquired_wall_time_sec
+                - instruction_received_wall_time_sec,
+            )
+        if semantic_completed_wall_time_sec > 0.0:
+            verification_to_axis_latency_sec = max(
+                0.0,
+                axis_acquired_wall_time_sec
+                - semantic_completed_wall_time_sec,
+            )
+
+        payload = {
+            "schema_version": "vlm_rcm_axis_latency.v1",
+            "request_id": request_id,
+            "instruction": self.verified_instruction,
+            "selected_candidate_id": (
+                None
+                if self.verified_candidate_id is None
+                else f"H{int(self.verified_candidate_id)}"
+            ),
+            "selected_id": self.verified_candidate_id,
+            "verification_decision": self.verified_decision,
+            "verification_reason": self.verified_reason,
+            "instruction_received_wall_time_sec": (
+                instruction_received_wall_time_sec
+            ),
+            "instruction_received_ros_stamp_sec": (
+                self.verified_instruction_received_ros_stamp_sec
+            ),
+            "semantic_completed_wall_time_sec": semantic_completed_wall_time_sec,
+            "semantic_latency_sec": self.verified_semantic_latency_sec,
+            "axis_acquired_wall_time_sec": axis_acquired_wall_time_sec,
+            "axis_acquired_ros_stamp_sec": axis_acquired_ros_stamp_sec,
+            "axis_latency_sec": axis_latency_sec,
+            "verification_to_axis_latency_sec": verification_to_axis_latency_sec,
+            "stable_samples": len(self.pose_samples),
+            "stable_frames_required": self.stable_frames,
+            "axis_source": str(diagnostics.get("axis_source", "")),
+            "surface_axis_source": str(
+                diagnostics.get("surface_axis_source", "")
+            ),
+            "point_world": [
+                float(point[0]),
+                float(point[1]),
+                float(point[2]),
+            ],
+            "axis_world": [
+                float(axis[0]),
+                float(axis[1]),
+                float(axis[2]),
+            ],
+            "surface_axis_world": [
+                float(surface_axis[0]),
+                float(surface_axis[1]),
+                float(surface_axis[2]),
+            ],
+        }
+
+        msg = String()
+        msg.data = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        self.pub_axis_latency.publish(msg)
+        self.axis_latency_reported_request_id = request_id
+
+        latency_text = (
+            "unknown"
+            if axis_latency_sec is None
+            else f"{axis_latency_sec:.3f}s"
+        )
+        verification_to_axis_text = (
+            "unknown"
+            if verification_to_axis_latency_sec is None
+            else f"{verification_to_axis_latency_sec:.3f}s"
+        )
+        self.get_logger().info(
+            "[AXIS_LATENCY] "
+            f"request_id={request_id} "
+            f"candidate=H{diagnostics.get('selected_id', '?')} "
+            f"instruction_to_axis={latency_text} "
+            f"semantic={self.verified_semantic_latency_sec:.3f}s "
+            f"verification_to_axis={verification_to_axis_text}"
+        )
+
     def update_lock(self, point, axis, diagnostics):
         surface_axis = normalize(
             diagnostics.get("surface_equivalent_axis", axis),
@@ -2040,6 +2240,12 @@ class VlmPortPoseNode(Node):
             self.locked_surface_axis = mean_surface_axis.copy()
             self.locked_axis_source = diagnostics["axis_source"]
             self.publish_locked_pose()
+            self.publish_axis_latency_record(
+                center,
+                mean_axis,
+                mean_surface_axis,
+                diagnostics,
+            )
             self.get_logger().info(
                 "[PORT_LOCKED] "
                 f"point=({center[0]:.4f},{center[1]:.4f},{center[2]:.4f}) "
@@ -2047,6 +2253,17 @@ class VlmPortPoseNode(Node):
                 f"{mean_axis[2]:.3f})"
             )
 
+        axis_latency_sec = None
+        if self.verified_instruction_received_wall_time_sec > 0.0:
+            axis_latency_sec = max(
+                0.0,
+                time.time() - self.verified_instruction_received_wall_time_sec,
+            )
+        axis_latency_text = (
+            "unknown"
+            if axis_latency_sec is None
+            else f"{axis_latency_sec:.3f}s"
+        )
         self.publish_status(
             "source=sam3+rgbd "
             f"prompt={self.current_prompt!r} score={self.latest_score:.3f} "
@@ -2057,6 +2274,8 @@ class VlmPortPoseNode(Node):
             f"{diagnostics.get('filter_note', '')} "
             f"verified_decision={self.verified_decision} "
             f"verified_reason={self.verified_reason} "
+            f"semantic_latency={self.verified_semantic_latency_sec:.3f}s "
+            f"axis_latency={axis_latency_text} "
             f"score={diagnostics.get('selection_score', 0.0):.3f} "
             f"rank={diagnostics.get('selection_rank', 0)} "
             f"geom_offset={diagnostics.get('depth_hole_center_offset_px', 0.0):.1f}px "
@@ -2100,6 +2319,8 @@ class VlmPortPoseNode(Node):
             last_candidates = list(self.last_candidates)
             last_selected_candidate_id = self.last_selected_candidate_id
             locked_axis_source = self.locked_axis_source
+            language_detection_armed = self.language_detection_armed
+            language_instruction = self.language_instruction
             depth = (
                 None
                 if self.latest_depth is None
@@ -2121,6 +2342,25 @@ class VlmPortPoseNode(Node):
                     f"axis: {locked_axis_source}"
                 ),
                 locked=True,
+            )
+            return
+        if self.require_language_instruction and not language_detection_armed:
+            self.pose_samples.clear()
+            self.surface_axis_samples.clear()
+            self.publish_ready(False)
+            self.publish_status(
+                "idle_waiting_for_language_instruction; "
+                "candidate estimation is disabled before language command",
+                valid=False,
+            )
+            self.publish_overlay(
+                mask,
+                info,
+                status=(
+                    "idle: send language instruction to start target "
+                    "port detection"
+                ),
+                locked=False,
             )
             return
         if depth is None or info is None:
@@ -2204,6 +2444,7 @@ class VlmPortPoseNode(Node):
                     reason = self.verified_reason
                 if requested_id is None:
                     status = (
+                        f"instruction={language_instruction!r} "
                         f"candidates={len(candidates)} "
                         "waiting_for_verified_selection"
                     )

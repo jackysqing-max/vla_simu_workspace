@@ -16,6 +16,9 @@ QWEN3_PORT="${QWEN3_PORT:-8000}"
 QWEN3_READY_TIMEOUT_SEC="${QWEN3_READY_TIMEOUT_SEC:-240}"
 QWEN3_GPU_MEMORY_UTILIZATION="${QWEN3_GPU_MEMORY_UTILIZATION:-0.60}"
 QWEN3_MAX_MODEL_LEN="${QWEN3_MAX_MODEL_LEN:-4096}"
+QWEN_VL_INPUT_MODE="${QWEN_VL_INPUT_MODE:-auto}"
+QWEN_VL_ENABLE_LOCAL_FALLBACK="${QWEN_VL_ENABLE_LOCAL_FALLBACK:-true}"
+QWEN_VL_RETRY_TEXT_WITHOUT_IMAGES="${QWEN_VL_RETRY_TEXT_WITHOUT_IMAGES:-true}"
 RCM_PREINSERT_CLEARANCE_M="${RCM_PREINSERT_CLEARANCE_M:-0.040}"
 RCM_SPEED_MPS="${RCM_SPEED_MPS:-0.018}"
 RCM_TRAJECTORY_RADIUS_M="${RCM_TRAJECTORY_RADIUS_M:-0.020}"
@@ -216,6 +219,9 @@ start_execution_runtime() {
   QWEN_VL_MODEL="$QWEN_MODEL" \
   QWEN_VL_API_BASE_URL="http://127.0.0.1:$QWEN3_PORT/v1/chat/completions" \
   QWEN_VL_API_KEY="EMPTY" \
+  QWEN_VL_INPUT_MODE="$QWEN_VL_INPUT_MODE" \
+  QWEN_VL_ENABLE_LOCAL_FALLBACK="$QWEN_VL_ENABLE_LOCAL_FALLBACK" \
+  QWEN_VL_RETRY_TEXT_WITHOUT_IMAGES="$QWEN_VL_RETRY_TEXT_WITHOUT_IMAGES" \
   VLM_RCM_START_SEMANTIC_GROUNDER=true \
   VLM_RCM_SHOW_TOOL=true \
   VLM_RCM_SHOW_DVRK_LND=true \
@@ -318,6 +324,7 @@ case "${1:-start}" in
 	    echo "Monitor:"
 	    echo "  ros2 topic echo /llm_task/plan_json"
 	    echo "  ros2 topic echo /vlm_rcm/verification_result"
+	    echo "  ros2 topic echo /vlm_rcm/axis_latency"
 	    echo "  ros2 topic echo /surgical_rcm/status"
     echo "  ros2 topic echo /rcm_virtual_fixtures/stage"
     ;;

@@ -210,6 +210,21 @@ def image_downness(context: ScoringContext) -> float:
     return _clamp01(_as_float(center[1]) / height)
 
 
+def image_horizontal_centeredness(context: ScoringContext) -> float:
+    return _clamp01(1.0 - abs(image_leftness(context) - image_rightness(context)))
+
+
+def image_vertical_centeredness(context: ScoringContext) -> float:
+    return _clamp01(1.0 - abs(image_upness(context) - image_downness(context)))
+
+
+def image_centeredness(context: ScoringContext) -> float:
+    return 0.5 * (
+        image_horizontal_centeredness(context)
+        + image_vertical_centeredness(context)
+    )
+
+
 def phantom_leftness(context: ScoringContext) -> float:
     return _as_float(context.candidate.get("phantom_leftness"), default=0.0)
 
@@ -263,6 +278,9 @@ REGISTERED_FUNCTIONS: dict[str, Callable[..., float]] = {
     "image_rightness": image_rightness,
     "image_upness": image_upness,
     "image_downness": image_downness,
+    "image_horizontal_centeredness": image_horizontal_centeredness,
+    "image_vertical_centeredness": image_vertical_centeredness,
+    "image_centeredness": image_centeredness,
     "phantom_leftness": phantom_leftness,
     "phantom_upness": phantom_upness,
     "between": between,

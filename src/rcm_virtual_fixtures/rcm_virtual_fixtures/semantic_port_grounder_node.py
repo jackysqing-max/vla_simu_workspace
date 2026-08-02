@@ -20,6 +20,10 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
 from std_msgs.msg import String
 
+from rcm_virtual_fixtures.port_grounding_expression import (
+    ScoringExpressionError,
+    score_candidates,
+)
 from rcm_virtual_fixtures.semantic_geometric_verifier import (
     VerificationThresholds,
     candidate_id_text,
@@ -108,6 +112,235 @@ def extract_json_object(text: str) -> dict:
     raise ValueError("unable to isolate a valid JSON object")
 
 
+def _contains_any(text: str, tokens: tuple[str, ...]) -> bool:
+    return any(token in text for token in tokens)
+
+
+def local_scoring_expression_from_instruction(instruction: str) -> tuple[str, str]:
+    """Map common text-only port instructions to safe candidate scoring expressions.
+
+    This is intentionally narrow: it covers the demo language for camera-frame
+    spatial references without pretending that a text-only LLM has visual access.
+    """
+
+    raw = str(instruction or "").strip()
+    text = raw.lower()
+    compact = re.sub(r"\s+", "", raw).lower()
+
+    id_match = re.search(r"\b[hH]\s*(\d+)\b", raw)
+    if id_match is None:
+        id_match = re.search(r"第?\s*(\d+)\s*(?:号\s*)?孔", raw)
+    if id_match is not None:
+        candidate_id = int(id_match.group(1))
+        return (
+            f"candidate.id == {candidate_id}",
+            f"explicit candidate id H{candidate_id}",
+        )
+
+    has_upper_left = (
+        "左上" in compact
+        or "上左" in compact
+        or "upper left" in text
+        or "top left" in text
+        or "left upper" in text
+    )
+    has_upper_right = (
+        "右上" in compact
+        or "上右" in compact
+        or "upper right" in text
+        or "top right" in text
+        or "right upper" in text
+    )
+    has_lower_left = (
+        "左下" in compact
+        or "下左" in compact
+        or "lower left" in text
+        or "bottom left" in text
+        or "left lower" in text
+    )
+    has_lower_right = (
+        "右下" in compact
+        or "下右" in compact
+        or "lower right" in text
+        or "bottom right" in text
+        or "right lower" in text
+    )
+
+    quality_tie_break = " + 0.01 * candidate.geometry_confidence"
+    if has_upper_left:
+        return (
+            "image_leftness() + image_upness()" + quality_tie_break,
+            "camera-frame upper-left",
+        )
+    if has_upper_right:
+        return (
+            "image_rightness() + image_upness()" + quality_tie_break,
+            "camera-frame upper-right",
+        )
+    if has_lower_left:
+        return (
+            "image_leftness() + image_downness()" + quality_tie_break,
+            "camera-frame lower-left",
+        )
+    if has_lower_right:
+        return (
+            "image_rightness() + image_downness()" + quality_tie_break,
+            "camera-frame lower-right",
+        )
+
+    if _contains_any(
+        compact,
+        ("中间", "中心", "中央", "正中", "中部"),
+    ) or _contains_any(text, ("middle", "center", "central")):
+        return (
+            "image_centeredness()" + quality_tie_break,
+            "camera-frame center",
+        )
+    if _contains_any(
+        compact,
+        ("最左", "左侧", "左边", "左排", "左列"),
+    ) or "left" in text:
+        return (
+            "image_leftness()" + quality_tie_break,
+            "camera-frame left",
+        )
+    if _contains_any(
+        compact,
+        ("最右", "右侧", "右边", "右排", "右列"),
+    ) or "right" in text:
+        return (
+            "image_rightness()" + quality_tie_break,
+            "camera-frame right",
+        )
+    if _contains_any(
+        compact,
+        ("最上", "上方", "上面", "上边", "上排", "顶部"),
+    ) or _contains_any(text, ("top", "upper")):
+        return (
+            "image_upness()" + quality_tie_break,
+            "camera-frame upper",
+        )
+    if _contains_any(
+        compact,
+        ("最下", "下方", "下面", "下边", "下排", "底部"),
+    ) or _contains_any(text, ("bottom", "lower")):
+        return (
+            "image_downness()" + quality_tie_break,
+            "camera-frame lower",
+        )
+
+    return "", "unresolved_text_only_instruction"
+
+
+def build_local_grounding_hypothesis(
+    instruction: str,
+    candidates_payload: dict,
+    *,
+    previous_selection: dict | None = None,
+    fallback_reason: str = "",
+) -> dict | None:
+    expression, reference = local_scoring_expression_from_instruction(instruction)
+    if not expression:
+        return None
+
+    candidates = candidates_from_payload(candidates_payload)
+    if not candidates:
+        return None
+
+    try:
+        scores = score_candidates(
+            expression,
+            candidates,
+            scene={},
+            previous=previous_selection,
+        )
+    except ScoringExpressionError:
+        return None
+    if not scores:
+        return None
+
+    top_score = float(scores[0]["score"])
+    min_score = min(float(item["score"]) for item in scores)
+    spread = max(top_score - min_score, 1e-9)
+    ranking = []
+    for item in scores:
+        score = (float(item["score"]) - min_score) / spread
+        ranking.append(
+            {
+                "candidate_id": item["candidate_id"],
+                "semantic_score": max(0.0, min(1.0, score)),
+                "reason": reference,
+            }
+        )
+
+    selected_candidate_id = candidate_id_text(scores[0]["candidate_id"])
+    return {
+        "objective_text": instruction,
+        "selected_candidate_id": selected_candidate_id,
+        "candidate_ranking": ranking,
+        "scoring_program": expression,
+        "evidence": (
+            "text/local fallback selected from dynamic RGB-D candidates; "
+            f"reference={reference}; fallback_reason={fallback_reason}"
+        ),
+        "ambiguous": False,
+        "allow_alternative": False,
+        "excluded_candidate_ids": [],
+        "reference_description": reference,
+        "resolved_frame_id": "camera_image",
+        "grounding_mode": "text_local_fallback",
+    }
+
+
+def sam_prompt_from_instruction(instruction: str) -> str:
+    raw = str(instruction or "").strip()
+    text = raw.lower()
+    compact = re.sub(r"\s+", "", raw).lower()
+    object_text = "circular hole on the phantom"
+    if not raw:
+        return object_text
+
+    if (
+        "左上" in compact
+        or "上左" in compact
+        or "upper left" in text
+        or "top left" in text
+    ):
+        return f"upper left {object_text}"
+    if (
+        "右上" in compact
+        or "上右" in compact
+        or "upper right" in text
+        or "top right" in text
+    ):
+        return f"upper right {object_text}"
+    if (
+        "左下" in compact
+        or "下左" in compact
+        or "lower left" in text
+        or "bottom left" in text
+    ):
+        return f"lower left {object_text}"
+    if (
+        "右下" in compact
+        or "下右" in compact
+        or "lower right" in text
+        or "bottom right" in text
+    ):
+        return f"lower right {object_text}"
+    if _contains_any(
+        compact,
+        ("中间", "中心", "中央", "正中", "中部"),
+    ) or _contains_any(text, ("middle", "center", "central")):
+        return f"center {object_text}"
+    if _contains_any(compact, ("孔", "入路", "穿刺点")) or _contains_any(
+        text,
+        ("hole", "port", "aperture"),
+    ):
+        return object_text
+    return raw
+
+
 class SemanticPortGrounder(Node):
     """Ask Qwen-VL for candidate semantics, then verify the result."""
 
@@ -118,6 +351,8 @@ class SemanticPortGrounder(Node):
         self.declare_parameter("candidates_topic", "/vlm_rcm/hole_candidates")
         self.declare_parameter("candidate_overlay_topic", "/vlm_rcm/candidate_overlay")
         self.declare_parameter("color_topic", "/sim/camera/color/image_raw")
+        self.declare_parameter("sam_prompt_topic", "/sam3/prompt")
+        self.declare_parameter("publish_sam_prompt_on_instruction", True)
         self.declare_parameter("semantic_request_topic", "/vlm_rcm/semantic_grounding_request")
         self.declare_parameter("semantic_hypothesis_topic", "/vlm_rcm/semantic_hypothesis")
         self.declare_parameter("verification_result_topic", "/vlm_rcm/verification_result")
@@ -134,6 +369,10 @@ class SemanticPortGrounder(Node):
         self.declare_parameter("request_timeout_sec", 90.0)
         self.declare_parameter("extra_request_body_json", "{}")
         self.declare_parameter("response_format_json", False)
+        self.declare_parameter("input_mode", "auto")
+        self.declare_parameter("enable_local_fallback", True)
+        self.declare_parameter("retry_text_without_images", True)
+        self.declare_parameter("require_post_instruction_candidates", True)
         self.declare_parameter("require_scoring_program", True)
         self.declare_parameter("min_model_margin", 0.08)
         self.declare_parameter("min_expression_margin", 1e-6)
@@ -146,6 +385,10 @@ class SemanticPortGrounder(Node):
             self.get_parameter("candidate_overlay_topic").value
         )
         self.color_topic = str(self.get_parameter("color_topic").value)
+        self.sam_prompt_topic = str(self.get_parameter("sam_prompt_topic").value)
+        self.publish_sam_prompt_on_instruction = bool(
+            self.get_parameter("publish_sam_prompt_on_instruction").value
+        )
         self.api_base_url = str(self.get_parameter("api_base_url").value).strip()
         self.api_key = str(self.get_parameter("api_key").value)
         self.api_key_env_var = str(self.get_parameter("api_key_env_var").value)
@@ -162,6 +405,16 @@ class SemanticPortGrounder(Node):
         )
         self.response_format_json = bool(
             self.get_parameter("response_format_json").value
+        )
+        self.input_mode = str(self.get_parameter("input_mode").value).strip().lower()
+        self.enable_local_fallback = bool(
+            self.get_parameter("enable_local_fallback").value
+        )
+        self.retry_text_without_images = bool(
+            self.get_parameter("retry_text_without_images").value
+        )
+        self.require_post_instruction_candidates = bool(
+            self.get_parameter("require_post_instruction_candidates").value
         )
         self.thresholds = VerificationThresholds(
             min_model_margin=float(self.get_parameter("min_model_margin").value),
@@ -210,6 +463,7 @@ class SemanticPortGrounder(Node):
             str(self.get_parameter("status_topic").value),
             10,
         )
+        self.pub_sam_prompt = self.create_publisher(String, self.sam_prompt_topic, 10)
 
         self.create_subscription(String, self.instruction_topic, self.on_instruction, 10)
         self.create_subscription(String, self.candidates_topic, self.on_candidates, qos_latched)
@@ -219,6 +473,8 @@ class SemanticPortGrounder(Node):
         self.lock = threading.Lock()
         self.pending_instruction = ""
         self.pending_request_id = 0
+        self.pending_instruction_received_wall_time_sec = 0.0
+        self.pending_instruction_received_ros_stamp_sec = 0.0
         self.latest_candidates_payload: dict | None = None
         self.latest_candidates_version = 0
         self.latest_overlay_msg = None
@@ -232,7 +488,9 @@ class SemanticPortGrounder(Node):
         self.get_logger().info(
             "semantic_port_grounder_node started: "
             f"instruction={self.instruction_topic}, candidates={self.candidates_topic}, "
-            f"overlay={self.candidate_overlay_topic}, model={self.model}"
+            f"overlay={self.candidate_overlay_topic}, model={self.model}, "
+            f"input_mode={self.input_mode}, local_fallback={self.enable_local_fallback}, "
+            f"sam_prompt_topic={self.sam_prompt_topic}"
         )
 
     def _parse_extra_request_body(self, raw_text: str) -> dict:
@@ -268,11 +526,20 @@ class SemanticPortGrounder(Node):
         instruction = str(msg.data or "").strip()
         if not instruction:
             return
+        received_wall_time_sec = time.time()
+        received_ros_stamp_sec = self.get_clock().now().nanoseconds * 1e-9
         with self.lock:
             self.pending_instruction = instruction
             self.pending_request_id += 1
+            self.pending_instruction_received_wall_time_sec = received_wall_time_sec
+            self.pending_instruction_received_ros_stamp_sec = received_ros_stamp_sec
+        if self.publish_sam_prompt_on_instruction:
+            prompt_msg = String()
+            prompt_msg.data = sam_prompt_from_instruction(instruction)
+            self.pub_sam_prompt.publish(prompt_msg)
         self._publish_status(
-            f"semantic_request_received: {instruction}",
+            "semantic_request_received: "
+            f"{instruction}; sam_prompt={sam_prompt_from_instruction(instruction)!r}",
             force=True,
         )
 
@@ -305,6 +572,26 @@ class SemanticPortGrounder(Node):
                 return
             instruction = self.pending_instruction
             request_id = self.pending_request_id
+            instruction_received_wall_time_sec = (
+                self.pending_instruction_received_wall_time_sec
+            )
+            instruction_received_ros_stamp_sec = (
+                self.pending_instruction_received_ros_stamp_sec
+            )
+            try:
+                candidates_stamp_sec = float(candidates_payload.get("stamp_sec", 0.0))
+            except Exception:
+                candidates_stamp_sec = 0.0
+            if (
+                self.require_post_instruction_candidates
+                and instruction_received_ros_stamp_sec > 0.0
+                and candidates_stamp_sec + 1e-6
+                < instruction_received_ros_stamp_sec
+            ):
+                self._publish_status(
+                    "waiting_for_post_instruction_port_candidates"
+                )
+                return
             candidates_version = self.latest_candidates_version
             overlay_msg = self.latest_overlay_msg
             color_msg = self.latest_color_msg
@@ -312,7 +599,16 @@ class SemanticPortGrounder(Node):
 
         thread = threading.Thread(
             target=self._run_grounding_request,
-            args=(request_id, instruction, candidates_version, candidates_payload, overlay_msg, color_msg),
+            args=(
+                request_id,
+                instruction,
+                instruction_received_wall_time_sec,
+                instruction_received_ros_stamp_sec,
+                candidates_version,
+                candidates_payload,
+                overlay_msg,
+                color_msg,
+            ),
             daemon=True,
         )
         thread.start()
@@ -345,8 +641,9 @@ class SemanticPortGrounder(Node):
     def _system_prompt(self) -> str:
         return (
             "You ground open natural-language RCM port instructions to the currently "
-            "visible dynamic candidate IDs. Use the marked image and the candidate "
-            "feature JSON. Do not invent candidate IDs. Do not output robot poses, "
+            "visible dynamic candidate IDs. Use the candidate feature JSON. If image "
+            "content is provided, use the marked image too. Do not invent candidate IDs. "
+            "Do not output robot poses, "
             "joint commands, torques, or trajectories. Return JSON only with: "
             "objective_text, selected_candidate_id, candidate_ranking, "
             "scoring_program, evidence, ambiguous, allow_alternative, "
@@ -363,6 +660,38 @@ class SemanticPortGrounder(Node):
             "explain the uncertainty in evidence."
         )
 
+    def _should_include_images(self) -> bool:
+        if self.input_mode in {
+            "local",
+            "local_only",
+            "local-only",
+            "rules",
+            "text",
+            "text_only",
+            "text-only",
+            "no_image",
+            "none",
+        }:
+            return False
+        if self.input_mode in {"vision", "vlm", "image", "images"}:
+            return True
+        model_text = self.model.lower()
+        return any(
+            token in model_text
+            for token in (
+                "-vl",
+                "_vl",
+                "vision",
+                "visual",
+                "llava",
+                "internvl",
+                "qwen2-vl",
+                "qwen2.5-vl",
+                "qwen3-vl",
+                "omni",
+            )
+        )
+
     def _build_model_payload(
         self,
         *,
@@ -370,9 +699,10 @@ class SemanticPortGrounder(Node):
         request_snapshot: dict,
         overlay_msg: Image | None,
         color_msg: Image | None,
+        include_images: bool,
     ) -> dict:
-        overlay_url = image_to_data_url(overlay_msg)
-        color_url = image_to_data_url(color_msg)
+        overlay_url = image_to_data_url(overlay_msg) if include_images else ""
+        color_url = image_to_data_url(color_msg) if include_images else ""
         text = (
             "Ground this RCM port instruction against the visible candidate IDs.\n\n"
             f"Instruction: {instruction}\n\n"
@@ -380,11 +710,14 @@ class SemanticPortGrounder(Node):
             f"{json.dumps(request_snapshot, ensure_ascii=False, separators=(',', ':'))}\n\n"
             "Return JSON only."
         )
-        content = [{"type": "text", "text": text}]
-        if color_url:
-            content.append({"type": "image_url", "image_url": {"url": color_url}})
-        if overlay_url:
-            content.append({"type": "image_url", "image_url": {"url": overlay_url}})
+        if include_images:
+            content = [{"type": "text", "text": text}]
+            if color_url:
+                content.append({"type": "image_url", "image_url": {"url": color_url}})
+            if overlay_url:
+                content.append({"type": "image_url", "image_url": {"url": overlay_url}})
+        else:
+            content = text
         payload = {
             "model": self.model,
             "messages": [
@@ -420,15 +753,84 @@ class SemanticPortGrounder(Node):
         response_text = extract_chat_completion_text(response_json)
         return extract_json_object(response_text), response_text
 
+    def _try_model_request(
+        self,
+        *,
+        instruction: str,
+        request_snapshot: dict,
+        overlay_msg: Image | None,
+        color_msg: Image | None,
+    ) -> tuple[dict, str]:
+        include_images = self._should_include_images()
+        model_payload = self._build_model_payload(
+            instruction=instruction,
+            request_snapshot=request_snapshot,
+            overlay_msg=overlay_msg,
+            color_msg=color_msg,
+            include_images=include_images,
+        )
+        try:
+            return self._request_model(model_payload)
+        except urllib.error.HTTPError:
+            if not include_images or not self.retry_text_without_images:
+                raise
+            self._publish_status(
+                "semantic_vision_request_failed_retrying_text_only",
+                force=True,
+            )
+            text_payload = self._build_model_payload(
+                instruction=instruction,
+                request_snapshot=request_snapshot,
+                overlay_msg=None,
+                color_msg=None,
+                include_images=False,
+            )
+            return self._request_model(text_payload)
+
     def _publish_json(self, publisher, payload: dict):
         msg = String()
         msg.data = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
         publisher.publish(msg)
 
+    def _try_local_fallback(
+        self,
+        *,
+        instruction: str,
+        candidates_payload: dict,
+        fallback_reason: str,
+    ) -> tuple[dict, dict] | None:
+        if not self.enable_local_fallback:
+            return None
+        hypothesis = build_local_grounding_hypothesis(
+            instruction,
+            candidates_payload,
+            previous_selection=self.previous_selection,
+            fallback_reason=fallback_reason,
+        )
+        if hypothesis is None:
+            return None
+        self._publish_status(
+            "semantic_text_local_fallback_started: "
+            f"{hypothesis.get('reference_description', '')}",
+            force=True,
+        )
+        self._publish_json(self.pub_hypothesis, hypothesis)
+        verification = verify_semantic_grounding(
+            candidates_payload,
+            hypothesis,
+            previous_selection=self.previous_selection,
+            thresholds=self.thresholds,
+        )
+        verification["fallback_reason"] = fallback_reason
+        verification["verification_source"] = "semantic_port_grounder_text_local_fallback"
+        return hypothesis, verification
+
     def _run_grounding_request(
         self,
         request_id: int,
         instruction: str,
+        instruction_received_wall_time_sec: float,
+        instruction_received_ros_stamp_sec: float,
         candidates_version: int,
         candidates_payload: dict,
         overlay_msg: Image | None,
@@ -437,6 +839,8 @@ class SemanticPortGrounder(Node):
         request_snapshot = {
             "request_id": request_id,
             "instruction": instruction,
+            "instruction_received_wall_time_sec": instruction_received_wall_time_sec,
+            "instruction_received_ros_stamp_sec": instruction_received_ros_stamp_sec,
             "candidate_snapshot_version": candidates_version,
             "image_size": candidates_payload.get("image_size"),
             "candidates": self._candidate_summary(candidates_payload),
@@ -450,48 +854,97 @@ class SemanticPortGrounder(Node):
 
         raw_response = ""
         try:
-            model_payload = self._build_model_payload(
-                instruction=instruction,
-                request_snapshot=request_snapshot,
-                overlay_msg=overlay_msg,
-                color_msg=color_msg,
-            )
-            hypothesis, raw_response = self._request_model(model_payload)
-            hypothesis.setdefault("instruction", instruction)
-            hypothesis["raw_model_response"] = raw_response[:4000]
-            self._publish_json(self.pub_hypothesis, hypothesis)
-            verification = verify_semantic_grounding(
-                candidates_payload,
-                hypothesis,
-                previous_selection=self.previous_selection,
-                thresholds=self.thresholds,
-            )
+            if self.input_mode in {"local", "local_only", "local-only", "rules"}:
+                fallback = self._try_local_fallback(
+                    instruction=instruction,
+                    candidates_payload=candidates_payload,
+                    fallback_reason=f"input_mode_{self.input_mode}",
+                )
+                if fallback is None:
+                    raise RuntimeError("local_text_grounding_unresolved")
+                hypothesis, verification = fallback
+            else:
+                hypothesis, raw_response = self._try_model_request(
+                    instruction=instruction,
+                    request_snapshot=request_snapshot,
+                    overlay_msg=overlay_msg,
+                    color_msg=color_msg,
+                )
+                hypothesis.setdefault("instruction", instruction)
+                hypothesis["raw_model_response"] = raw_response[:4000]
+                self._publish_json(self.pub_hypothesis, hypothesis)
+                verification = verify_semantic_grounding(
+                    candidates_payload,
+                    hypothesis,
+                    previous_selection=self.previous_selection,
+                    thresholds=self.thresholds,
+                )
+                if verification.get("decision") != "ACCEPT":
+                    fallback = self._try_local_fallback(
+                        instruction=instruction,
+                        candidates_payload=candidates_payload,
+                        fallback_reason=(
+                            "model_verification_"
+                            f"{verification.get('decision', 'UNKNOWN')}:"
+                            f"{verification.get('reason', '')}"
+                        ),
+                    )
+                    if fallback is not None:
+                        hypothesis, verification = fallback
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, Exception) as exc:
-            hypothesis = {
-                "instruction": instruction,
-                "objective_text": instruction,
-                "candidate_ranking": [],
-                "scoring_program": "",
-                "ambiguous": True,
-                "allow_alternative": False,
-                "grounding_error": str(exc),
-                "raw_model_response": raw_response[:4000],
-            }
-            self._publish_json(self.pub_hypothesis, hypothesis)
-            verification = {
-                "decision": "REQUERY",
-                "reason": f"semantic_model_failed:{exc}",
-                "selected_candidate_id": None,
-                "selected_id": None,
-                "candidate_scores": [],
-                "objective_text": instruction,
-                "allow_alternative": False,
-                "verification_source": "semantic_port_grounder_node",
-            }
+            fallback = self._try_local_fallback(
+                instruction=instruction,
+                candidates_payload=candidates_payload,
+                fallback_reason=f"semantic_model_failed:{exc}",
+            )
+            if fallback is not None:
+                hypothesis, verification = fallback
+            else:
+                hypothesis = {
+                    "instruction": instruction,
+                    "objective_text": instruction,
+                    "candidate_ranking": [],
+                    "scoring_program": "",
+                    "ambiguous": True,
+                    "allow_alternative": False,
+                    "grounding_error": str(exc),
+                    "raw_model_response": raw_response[:4000],
+                }
+                self._publish_json(self.pub_hypothesis, hypothesis)
+                verification = {
+                    "decision": "REQUERY",
+                    "reason": f"semantic_model_failed:{exc}",
+                    "selected_candidate_id": None,
+                    "selected_id": None,
+                    "candidate_scores": [],
+                    "objective_text": instruction,
+                    "allow_alternative": False,
+                    "verification_source": "semantic_port_grounder_node",
+                }
 
         verification["instruction"] = instruction
         verification["request_id"] = request_id
         verification["candidate_snapshot_version"] = candidates_version
+        verification["instruction_received_wall_time_sec"] = (
+            instruction_received_wall_time_sec
+        )
+        verification["instruction_received_ros_stamp_sec"] = (
+            instruction_received_ros_stamp_sec
+        )
+        semantic_completed_wall_time_sec = time.time()
+        semantic_completed_ros_stamp_sec = self.get_clock().now().nanoseconds * 1e-9
+        verification["semantic_completed_wall_time_sec"] = (
+            semantic_completed_wall_time_sec
+        )
+        verification["semantic_completed_ros_stamp_sec"] = (
+            semantic_completed_ros_stamp_sec
+        )
+        if instruction_received_wall_time_sec > 0.0:
+            verification["semantic_latency_sec"] = max(
+                0.0,
+                semantic_completed_wall_time_sec
+                - instruction_received_wall_time_sec,
+            )
         self._publish_json(self.pub_verification, verification)
 
         if verification.get("decision") == "ACCEPT":
@@ -503,7 +956,9 @@ class SemanticPortGrounder(Node):
                 selected_id,
             )
             self._publish_status(
-                f"semantic_verified_accept: selected={selected_id}",
+                "semantic_verified_accept: "
+                f"selected={selected_id} "
+                f"semantic_latency={verification.get('semantic_latency_sec', 0.0):.3f}s",
                 force=True,
             )
             with self.lock:
