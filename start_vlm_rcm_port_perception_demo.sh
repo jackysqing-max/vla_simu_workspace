@@ -12,6 +12,7 @@ SAM3_INFER_HZ="${SAM3_INFER_HZ:-1.0}"
 SAM3_MAX_SIDE="${SAM3_MAX_SIDE:-640}"
 SAM3_SCORE_TH="${SAM3_SCORE_TH:-0.05}"
 SAM3_MASK_TH="${SAM3_MASK_TH:-0.35}"
+SAM3_MIN_FREE_GPU_MIB="${SAM3_MIN_FREE_GPU_MIB:-6200}"
 
 VLM_RCM_GUI="${VLM_RCM_GUI:-true}"
 VLM_RCM_DISPLAY_OVERLAY="${VLM_RCM_DISPLAY_OVERLAY:-true}"
@@ -33,11 +34,12 @@ VLM_RCM_EXPECTED_Z_M="${VLM_RCM_EXPECTED_Z_M:-0.404701}"
 VLM_RCM_AXIS_MODE="${VLM_RCM_AXIS_MODE:-calibrated}"
 VLM_RCM_START_SEMANTIC_GROUNDER="${VLM_RCM_START_SEMANTIC_GROUNDER:-true}"
 QWEN3_PORT="${QWEN3_PORT:-8000}"
-QWEN_VL_MODEL="${QWEN_VL_MODEL:-${QWEN_MODEL:-Qwen/Qwen3-VL-4B-Instruct}}"
+QWEN_VL_MODEL="${QWEN_VL_MODEL:-${QWEN_MODEL:-Qwen/Qwen3-4B}}"
 QWEN_VL_API_BASE_URL="${QWEN_VL_API_BASE_URL:-http://127.0.0.1:${QWEN3_PORT}/v1/chat/completions}"
+QWEN_VL_MODELS_URL="${QWEN_VL_MODELS_URL:-${QWEN_VL_API_BASE_URL%/chat/completions}/models}"
 QWEN_VL_API_KEY="${QWEN_VL_API_KEY:-EMPTY}"
-QWEN_VL_INPUT_MODE="${QWEN_VL_INPUT_MODE:-auto}"
-QWEN_VL_ENABLE_LOCAL_FALLBACK="${QWEN_VL_ENABLE_LOCAL_FALLBACK:-true}"
+QWEN_VL_INPUT_MODE="${QWEN_VL_INPUT_MODE:-text}"
+QWEN_VL_ENABLE_LOCAL_FALLBACK="${QWEN_VL_ENABLE_LOCAL_FALLBACK:-false}"
 QWEN_VL_RETRY_TEXT_WITHOUT_IMAGES="${QWEN_VL_RETRY_TEXT_WITHOUT_IMAGES:-true}"
 
 PHANTOM_MESH="${PHANTOM_MESH:-$WS/install/rcm_virtual_fixtures/share/rcm_virtual_fixtures/meshes/phantom_multi.STL}"
@@ -91,6 +93,19 @@ start_bg_sam3() {
     exit 1
   fi
 
+  if [[ "$SAM3_DEVICE" == "cuda" ]] && command -v nvidia-smi >/dev/null 2>&1; then
+    local free_gpu_mib
+    free_gpu_mib="$(nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits \
+      | head -n 1 | tr -d '[:space:]')"
+    if [[ "$free_gpu_mib" =~ ^[0-9]+$ ]] && (( free_gpu_mib < SAM3_MIN_FREE_GPU_MIB )); then
+      echo "[ERROR] refusing to start SAM3: only ${free_gpu_mib} MiB GPU memory is free; " \
+           "at least ${SAM3_MIN_FREE_GPU_MIB} MiB is required." >&2
+      echo "        Use staged execution, a quantized/CPU Qwen backend, or free more VRAM; " \
+           "QWEN3_MAX_MODEL_LEN should remain 1792." >&2
+      exit 1
+    fi
+  fi
+
   setsid bash -lc "
     set +u
     source /opt/ros/humble/setup.bash
@@ -100,7 +115,7 @@ start_bg_sam3() {
     set -u 2>/dev/null || true
     exec python -m sam3_ros.sam3_mask_node --ros-args \
       -p image_topic:=/sim/camera/color/image_raw \
-      -p prompt:='$SAM3_PROMPT' \
+      -p \"prompt:='$SAM3_PROMPT'\" \
       -p device:='$SAM3_DEVICE' \
       -p infer_hz:=$SAM3_INFER_HZ \
       -p max_side:=$SAM3_MAX_SIDE \
@@ -159,6 +174,30 @@ case "${1:-start}" in
   start)
     source_env
     stop_all >/dev/null 2>&1 || true
+    startup_complete=false
+    cleanup_failed_start() {
+      if [[ "$startup_complete" != "true" ]]; then
+        echo "[ERROR] perception startup failed; cleaning partial processes" >&2
+        stop_all >/dev/null 2>&1 || true
+      fi
+    }
+    trap cleanup_failed_start EXIT
+
+    if [[ "$VLM_RCM_START_SEMANTIC_GROUNDER" == "true" ]]; then
+      if [[ "$QWEN_VL_INPUT_MODE" == "local" || "$QWEN_VL_INPUT_MODE" == "rules" ]]; then
+        echo "[ERROR] strict grounding forbids QWEN_VL_INPUT_MODE=$QWEN_VL_INPUT_MODE" >&2
+        exit 2
+      fi
+      if [[ "$QWEN_VL_ENABLE_LOCAL_FALLBACK" != "false" ]]; then
+        echo "[ERROR] strict grounding requires QWEN_VL_ENABLE_LOCAL_FALLBACK=false" >&2
+        exit 2
+      fi
+      if ! curl -fsS --max-time 5 "$QWEN_VL_MODELS_URL" >/dev/null 2>&1; then
+        echo "[ERROR] strict grounding requires a live model backend: $QWEN_VL_MODELS_URL" >&2
+        echo "        No local/rule fallback will be used." >&2
+        exit 1
+      fi
+    fi
 
     start_bg_ros vlm_rcm_port_sim \
       "ros2 run pybullet_ros2_sim iiwa_pybullet_sim_node --ros-args \
@@ -238,7 +277,7 @@ case "${1:-start}" in
        -p hole_min_area_px:=80 \
 	       -p min_mask_area_px:=25 \
 	       -p min_score:=0.03 \
-	       -p language_instruction_topic:=/vlm_rcm/language_command \
+	       -p language_control_topic:=/vlm_rcm/language_control \
 	       -p require_language_instruction:=true \
 	       -p stable_frames:=3 \
 	       -p stability_window:=5 \
@@ -256,12 +295,13 @@ case "${1:-start}" in
 	         -p model:='$QWEN_VL_MODEL' \
 	         -p temperature:=0.0 \
 	         -p top_p:=1.0 \
-	         -p max_output_tokens:=768 \
+	         -p max_output_tokens:=256 \
 	         -p request_timeout_sec:=90.0 \
 	         -p input_mode:='$QWEN_VL_INPUT_MODE' \
 	         -p enable_local_fallback:=$QWEN_VL_ENABLE_LOCAL_FALLBACK \
 	         -p retry_text_without_images:=$QWEN_VL_RETRY_TEXT_WITHOUT_IMAGES \
 	         -p sam_prompt_topic:=/sam3/prompt \
+	         -p language_control_topic:=/vlm_rcm/language_control \
 	         -p publish_sam_prompt_on_instruction:=true \
 	         -p require_post_instruction_candidates:=true \
 	         -p require_scoring_program:=true \
@@ -270,6 +310,8 @@ case "${1:-start}" in
 	    fi
 
 	    start_bg_sam3
+	    startup_complete=true
+	    trap - EXIT
 
 	    echo
 	    echo "[OK] SAM3 VLM-RCM port perception demo started."
@@ -279,13 +321,14 @@ case "${1:-start}" in
 	      echo "     startup prompt: <idle until language instruction>"
 	    fi
 	    echo "     semantic grounder: $VLM_RCM_START_SEMANTIC_GROUNDER model=$QWEN_VL_MODEL"
-	    echo "     semantic input: $QWEN_VL_INPUT_MODE, local fallback: $QWEN_VL_ENABLE_LOCAL_FALLBACK"
+	    echo "     semantic input: $QWEN_VL_INPUT_MODE, strict model only (no local fallback)"
 	    echo "     PyBullet: yellow sphere = exact locked point; green spheres = candidates; cyan arrow = inward axis"
 	    echo "     Camera window: green = SAM3 mask, IDs = dynamic candidates"
 	    echo
 	    echo "Monitor:"
 	    echo "  ros2 topic echo /vlm_rcm/status"
 	    echo "  ros2 topic echo /vlm_rcm/semantic_status"
+	    echo "  ros2 topic echo /vlm_rcm/language_control"
 	    echo "  ros2 topic echo /vlm_rcm/verification_result"
 	    echo "  ros2 topic echo /vlm_rcm/axis_latency"
 	    echo "  ros2 topic echo /vlm_rcm/locked_port_point"
@@ -324,11 +367,15 @@ case "${1:-start}" in
     fi
     source_env
     python3 "$WS/docs/recording_scripts/vlm_rcm_locate_capture.py" \
-      "$@" \
-      --sam-prompt "$SAM3_PROMPT"
+      "$@"
+    ;;
+  unlock)
+    source_env
+    python3 "$WS/docs/recording_scripts/vlm_rcm_locate_capture.py" \
+      "解锁当前RCM点"
     ;;
   *)
-    echo "Usage: $0 {start|stop|status|logs|prompt \"text\"|locate \"text\"}"
+    echo "Usage: $0 {start|stop|status|logs|prompt \"text\"|locate \"text\"|unlock}"
     exit 2
     ;;
 esac

@@ -80,8 +80,17 @@ class Sam3MaskNode(Node):
         qos.reliability = ReliabilityPolicy.BEST_EFFORT
         qos.durability = DurabilityPolicy.VOLATILE
 
+        qos_prompt = QoSProfile(depth=1)
+        qos_prompt.reliability = ReliabilityPolicy.RELIABLE
+        qos_prompt.durability = DurabilityPolicy.TRANSIENT_LOCAL
+
         self.sub = self.create_subscription(Image, self.image_topic, self.on_image, qos)
-        self.sub_prompt = self.create_subscription(String, self.prompt_topic, self.on_prompt, 10)
+        self.sub_prompt = self.create_subscription(
+            String,
+            self.prompt_topic,
+            self.on_prompt,
+            qos_prompt,
+        )
         self.pub_active_prompt = self.create_publisher(String, self.active_prompt_topic, 10)
         self.pub_mask = self.create_publisher(Image, "/sam3/mask", 1)
         self.pub_score = self.create_publisher(Float32, "/sam3/score", 1)
@@ -180,11 +189,12 @@ class Sam3MaskNode(Node):
             last_run = time.time()
 
             try:
+                inference_prompt = str(self.prompt)
                 rgb_small, (orig_h, orig_w) = resize_keep_aspect(rgb, self.max_side)
                 pil_image = PILImage.fromarray(rgb_small)
                 inputs = self.processor(
                     images=pil_image,
-                    text=self.prompt,
+                    text=inference_prompt,
                     return_tensors="pt",
                 ).to(self.device)
 
@@ -203,6 +213,15 @@ class Sam3MaskNode(Node):
                     mask_threshold=self.mask_th,
                     target_sizes=inputs.get("original_sizes").tolist(),
                 )[0]
+
+                # A prompt can change while GPU inference is in flight.  Never
+                # publish an old-prompt mask into the new language request.
+                if inference_prompt != self.prompt:
+                    self.get_logger().info(
+                        "Discarded stale inference result: "
+                        f"prompt={inference_prompt!r} active={self.prompt!r}"
+                    )
+                    continue
 
                 masks = result["masks"].detach().cpu().numpy()
                 scores = result["scores"].detach().cpu().numpy()
@@ -226,13 +245,13 @@ class Sam3MaskNode(Node):
                         dtype=np.uint8,
                     )
                     self._log_status(
-                        f"prompt='{self.prompt}' no mask above threshold "
+                        f"prompt='{inference_prompt}' no mask above threshold "
                         f"(best_score={best_score:.3f}, score_th={self.score_th:.3f})"
                     )
                 else:
                     mask_area = int(np.count_nonzero(top_mask))
                     self._log_status(
-                        f"prompt='{self.prompt}' union_masks={kept_count} "
+                        f"prompt='{inference_prompt}' union_masks={kept_count} "
                         f"top_score={top_score:.3f} area={mask_area}"
                     )
 
@@ -244,10 +263,12 @@ class Sam3MaskNode(Node):
                         )
                     )
 
-                self.pub_mask.publish(mask_to_imgmsg(top_mask, header))
                 score_msg = Float32()
-                score_msg.data = top_score
+                # Publish the actual best score even when it is below the mask
+                # threshold.  Consumers can then explain why no mask was emitted.
+                score_msg.data = best_score
                 self.pub_score.publish(score_msg)
+                self.pub_mask.publish(mask_to_imgmsg(top_mask, header))
 
             except Exception as exc:
                 self.get_logger().error(f"Infer error: {exc!r}")

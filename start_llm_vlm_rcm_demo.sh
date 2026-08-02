@@ -11,13 +11,13 @@ LLM_BACKEND="${LLM_BACKEND:-qwen3_local}"
 GPU_EXECUTION_MODE="${GPU_EXECUTION_MODE:-online_qwen_vl}"
 QWEN3_AUTO_START="${QWEN3_AUTO_START:-true}"
 QWEN3_VENV="${QWEN3_VENV:-$WORKSPACE_PARENT/.venvs/qwen3-vllm}"
-QWEN_MODEL="${QWEN_MODEL:-Qwen/Qwen3-VL-4B-Instruct}"
+QWEN_MODEL="${QWEN_MODEL:-Qwen/Qwen3-4B}"
 QWEN3_PORT="${QWEN3_PORT:-8000}"
 QWEN3_READY_TIMEOUT_SEC="${QWEN3_READY_TIMEOUT_SEC:-240}"
-QWEN3_GPU_MEMORY_UTILIZATION="${QWEN3_GPU_MEMORY_UTILIZATION:-0.60}"
-QWEN3_MAX_MODEL_LEN="${QWEN3_MAX_MODEL_LEN:-4096}"
-QWEN_VL_INPUT_MODE="${QWEN_VL_INPUT_MODE:-auto}"
-QWEN_VL_ENABLE_LOCAL_FALLBACK="${QWEN_VL_ENABLE_LOCAL_FALLBACK:-true}"
+QWEN3_GPU_MEMORY_UTILIZATION="${QWEN3_GPU_MEMORY_UTILIZATION:-0.55}"
+QWEN3_MAX_MODEL_LEN="${QWEN3_MAX_MODEL_LEN:-1792}"
+QWEN_VL_INPUT_MODE="${QWEN_VL_INPUT_MODE:-text}"
+QWEN_VL_ENABLE_LOCAL_FALLBACK="${QWEN_VL_ENABLE_LOCAL_FALLBACK:-false}"
 QWEN_VL_RETRY_TEXT_WITHOUT_IMAGES="${QWEN_VL_RETRY_TEXT_WITHOUT_IMAGES:-true}"
 RCM_PREINSERT_CLEARANCE_M="${RCM_PREINSERT_CLEARANCE_M:-0.040}"
 RCM_SPEED_MPS="${RCM_SPEED_MPS:-0.018}"
@@ -167,23 +167,12 @@ stop_named_process() {
 }
 
 start_planner() {
-  if [[ "$LLM_BACKEND" == "qwen3_local" ]]; then
-    start_bg_ros llm_vlm_rcm_planner \
-      "ros2 run pybullet_ros2_sim llm_task_planner_node --ros-args \
-       --params-file '$WS/install/pybullet_ros2_sim/share/pybullet_ros2_sim/config/llm_task_planner_qwen3_rcm.yaml' \
-       -p api_base_url:=http://127.0.0.1:$QWEN3_PORT/v1/chat/completions \
-       -p model:='$QWEN_MODEL'"
-  else
-    start_bg_ros llm_vlm_rcm_planner \
-      "ros2 run pybullet_ros2_sim llm_task_planner_node --ros-args \
-       -p api_protocol:=chat_completions \
-       -p api_base_url:=http://127.0.0.1:1/v1/chat/completions \
-       -p api_key_required:=false \
-       -p request_timeout_sec:=0.2 \
-       -p open_vocabulary_targets:=true \
-       -p enable_rcm_actions:=true \
-       -p allow_local_fallback:=true"
-  fi
+  start_bg_ros llm_vlm_rcm_planner \
+    "ros2 run pybullet_ros2_sim llm_task_planner_node --ros-args \
+     --params-file '$WS/install/pybullet_ros2_sim/share/pybullet_ros2_sim/config/llm_task_planner_qwen3_rcm.yaml' \
+     -p api_base_url:=http://127.0.0.1:$QWEN3_PORT/v1/chat/completions \
+     -p model:='$QWEN_MODEL' \
+     -p allow_local_fallback:=false"
 }
 
 start_executor() {
@@ -286,6 +275,10 @@ show_status() {
 case "${1:-start}" in
   start)
     source_env
+    if [[ "$LLM_BACKEND" != "qwen3_local" ]]; then
+      echo "[ERROR] strict mode requires LLM_BACKEND=qwen3_local; local fallback is forbidden" >&2
+      exit 2
+    fi
     printf '%s\n%s\n' "$LLM_BACKEND" "$GPU_EXECUTION_MODE" >"$MODE_FILE"
     if [[ "$LLM_BACKEND" == "qwen3_local" ]] && http_ready; then
       stop_owned_processes true >/dev/null 2>&1 || true
@@ -294,12 +287,7 @@ case "${1:-start}" in
     fi
     ./start_vlm_rcm_port_perception_demo.sh stop >/dev/null 2>&1 || true
 
-    if [[ "$LLM_BACKEND" == "qwen3_local" ]]; then
-      start_qwen3_if_needed
-    elif [[ "$LLM_BACKEND" != "local_fallback" ]]; then
-      echo "[ERROR] LLM_BACKEND must be qwen3_local or local_fallback" >&2
-      exit 2
-    fi
+    start_qwen3_if_needed
 
     start_planner
     start_executor
@@ -370,10 +358,23 @@ case "${1:-start}" in
       exit 2
     fi
     source_env
-    stop_owned_processes false >/dev/null 2>&1 || true
-    VLM_RCM_SHOW_TOOL=false \
-    VLM_RCM_SHOW_DVRK_LND=false \
-      ./start_vlm_rcm_port_perception_demo.sh start
+    stop_owned_processes true >/dev/null 2>&1 || true
+    # Release SAM3 before starting/restarting Qwen.  Starting Qwen while an
+    # older SAM3 still owns VRAM can fail before the perception restart begins.
+    ./start_vlm_rcm_port_perception_demo.sh stop >/dev/null 2>&1 || true
+    start_qwen3_if_needed
+    if ! env \
+      QWEN_VL_MODEL="$QWEN_MODEL" \
+      QWEN_VL_API_BASE_URL="http://127.0.0.1:$QWEN3_PORT/v1/chat/completions" \
+      QWEN_VL_INPUT_MODE=text \
+      QWEN_VL_ENABLE_LOCAL_FALLBACK=false \
+      VLM_RCM_SHOW_TOOL=false \
+      VLM_RCM_SHOW_DVRK_LND=false \
+      ./start_vlm_rcm_port_perception_demo.sh start; then
+      stop_named_process llm_vlm_rcm_qwen3
+      echo "[ERROR] locate startup failed; Qwen and partial perception processes were stopped" >&2
+      exit 1
+    fi
     ./start_vlm_rcm_port_perception_demo.sh locate "$@"
     ;;
   stop)

@@ -28,9 +28,7 @@ class SurgicalRcmTaskExecutor(Node):
         super().__init__("surgical_rcm_task_executor_node")
 
         self.declare_parameter("plan_topic", "/llm_task/plan_json")
-        self.declare_parameter("prompt_topic", "/sam3/prompt")
         self.declare_parameter("language_command_topic", "/vlm_rcm/language_command")
-        self.declare_parameter("port_detection_prompt", "circular hole")
         self.declare_parameter("port_ready_topic", "/vlm_rcm/port_ready")
         self.declare_parameter(
             "port_point_topic",
@@ -75,13 +73,9 @@ class SurgicalRcmTaskExecutor(Node):
         self.declare_parameter("status_heartbeat_sec", 0.5)
 
         self.plan_topic = str(self.get_parameter("plan_topic").value)
-        self.prompt_topic = str(self.get_parameter("prompt_topic").value)
         self.language_command_topic = str(
             self.get_parameter("language_command_topic").value
         )
-        self.port_detection_prompt = str(
-            self.get_parameter("port_detection_prompt").value
-        ).strip() or "circular hole"
         self.port_ready_topic = str(
             self.get_parameter("port_ready_topic").value
         )
@@ -134,11 +128,6 @@ class SurgicalRcmTaskExecutor(Node):
             depth=1,
             reliability=ReliabilityPolicy.RELIABLE,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
-        )
-        self.pub_prompt = self.create_publisher(
-            String,
-            self.prompt_topic,
-            10,
         )
         self.pub_language_command = self.create_publisher(
             String,
@@ -265,16 +254,11 @@ class SurgicalRcmTaskExecutor(Node):
         msg.data = bool(enabled)
         self.pub_camera_enable.publish(msg)
 
-    def _publish_prompt(self, prompt: str):
-        msg = String()
-        msg.data = str(prompt)
-        self.pub_prompt.publish(msg)
-        self.last_prompt_ns = self._now_ns()
-
     def _publish_language_command(self, command: str):
         msg = String()
         msg.data = str(command)
         self.pub_language_command.publish(msg)
+        self.last_prompt_ns = self._now_ns()
 
     def _localize_language_command(self) -> str:
         task = self.plan if isinstance(self.plan, dict) else {}
@@ -478,7 +462,6 @@ class SurgicalRcmTaskExecutor(Node):
         if (
             now_ns - self.last_prompt_ns
         ) * 1e-9 >= self.prompt_republish_sec:
-            self._publish_prompt(self.port_detection_prompt)
             self._publish_language_command(self._localize_language_command())
         localized = (
             self.port_ready

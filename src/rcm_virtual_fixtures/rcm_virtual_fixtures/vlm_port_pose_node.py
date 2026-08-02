@@ -18,6 +18,7 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo, Image
 from std_msgs.msg import Bool, Float32, String
+
 from tf2_ros import Buffer, TransformListener
 
 
@@ -240,7 +241,7 @@ class VlmPortPoseNode(Node):
         self.declare_parameter("status_topic", "/vlm_rcm/status")
         self.declare_parameter("candidate_topic", "/vlm_rcm/hole_candidates")
         self.declare_parameter("candidate_alias_topic", "/vlm_rcm/candidates")
-        self.declare_parameter("language_instruction_topic", "/vlm_rcm/language_command")
+        self.declare_parameter("language_control_topic", "/vlm_rcm/language_control")
         self.declare_parameter("require_language_instruction", True)
         self.declare_parameter(
             "verified_selection_topic",
@@ -252,6 +253,8 @@ class VlmPortPoseNode(Node):
         self.declare_parameter("candidate_overlay_topic", "/vlm_rcm/candidate_overlay")
         self.declare_parameter("display_overlay", True)
         self.declare_parameter("display_scale", 1.25)
+        self.declare_parameter("target_not_found_timeout_sec", 6.0)
+        self.declare_parameter("target_not_found_min_frames", 3)
         self.declare_parameter(
             "display_window_name",
             "VLM RCM Port Detection",
@@ -267,8 +270,8 @@ class VlmPortPoseNode(Node):
         )
         self.score_topic = str(self.get_parameter("score_topic").value)
         self.prompt_topic = str(self.get_parameter("prompt_topic").value)
-        self.language_instruction_topic = str(
-            self.get_parameter("language_instruction_topic").value
+        self.language_control_topic = str(
+            self.get_parameter("language_control_topic").value
         )
         self.require_language_instruction = bool(
             self.get_parameter("require_language_instruction").value
@@ -409,6 +412,14 @@ class VlmPortPoseNode(Node):
             float(self.get_parameter("display_scale").value),
             0.25,
         )
+        self.target_not_found_timeout_sec = max(
+            float(self.get_parameter("target_not_found_timeout_sec").value),
+            0.0,
+        )
+        self.target_not_found_min_frames = max(
+            int(self.get_parameter("target_not_found_min_frames").value),
+            1,
+        )
         self.display_window_name = str(
             self.get_parameter("display_window_name").value
         )
@@ -455,9 +466,9 @@ class VlmPortPoseNode(Node):
         self.create_subscription(String, self.prompt_topic, self.on_prompt, 10)
         self.create_subscription(
             String,
-            self.language_instruction_topic,
-            self.on_language_instruction,
-            10,
+            self.language_control_topic,
+            self.on_language_control,
+            qos_latched,
         )
         self.create_subscription(
             String,
@@ -551,6 +562,7 @@ class VlmPortPoseNode(Node):
         self.latest_depth = None
         self.latest_depth_header = None
         self.latest_info = None
+        self.last_image_shape = None
         self.latest_score = 0.0
         self.current_prompt = ""
         self.pose_samples = deque(maxlen=self.stability_window)
@@ -565,6 +577,8 @@ class VlmPortPoseNode(Node):
         self.language_detection_armed = not self.require_language_instruction
         self.language_instruction = ""
         self.language_instruction_wall_time_sec = 0.0
+        self.low_score_frame_count = 0
+        self.target_not_found = False
         self.verified_candidate_id = None
         self.verified_instruction = ""
         self.verified_reason = ""
@@ -631,6 +645,8 @@ class VlmPortPoseNode(Node):
             self.language_detection_armed = not self.require_language_instruction
             self.language_instruction = ""
             self.language_instruction_wall_time_sec = 0.0
+        self.low_score_frame_count = 0
+        self.target_not_found = False
         if clear_verified_selection:
             self.verified_candidate_id = None
             self.verified_instruction = ""
@@ -657,9 +673,43 @@ class VlmPortPoseNode(Node):
                 self.publish_ready(False)
             self.current_prompt = prompt
 
-    def on_language_instruction(self, msg: String):
-        instruction = str(msg.data or "").strip()
-        if not instruction:
+    def on_language_control(self, msg: String):
+        try:
+            control = json.loads(msg.data)
+            if not isinstance(control, dict):
+                raise ValueError("language control must be a JSON object")
+        except Exception as exc:
+            self.publish_status(
+                f"language_control_rejected: invalid JSON {exc}",
+                valid=False,
+            )
+            return
+        if str(control.get("source", "")).strip().lower() != "llm":
+            self.publish_status(
+                "language_control_rejected: source is not llm",
+                valid=False,
+            )
+            return
+        action = str(control.get("action", "")).strip().lower()
+        instruction = str(control.get("instruction", "")).strip()
+        if action == "unlock":
+            with self.lock:
+                self.clear_lock_state(
+                    clear_verified_selection=True,
+                    clear_language_instruction=True,
+                )
+            self.publish_ready(False)
+            self.publish_status(
+                "language_unlock_complete; waiting for a new target instruction",
+                valid=False,
+            )
+            self.get_logger().info("[PORT_UNLOCKED] language command")
+            return
+        if action != "locate" or not instruction:
+            self.publish_status(
+                f"language_control_rejected: action={action or 'missing'}",
+                valid=False,
+            )
             return
         with self.lock:
             self.clear_lock_state(
@@ -669,9 +719,11 @@ class VlmPortPoseNode(Node):
             self.language_detection_armed = True
             self.language_instruction = instruction
             self.language_instruction_wall_time_sec = time.time()
+            self.low_score_frame_count = 0
+            self.target_not_found = False
         self.publish_ready(False)
         self.publish_status(
-            "language_instruction_armed_detection: "
+            "llm_locate_armed_detection: "
             f"{instruction}",
             valid=False,
         )
@@ -845,6 +897,7 @@ class VlmPortPoseNode(Node):
             candidates = list(self.last_candidates)
             selected_candidate_id = self.last_selected_candidate_id
             filter_note = self.last_filter_note
+            image_shape = self.last_image_shape
         if point is None or axis is None:
             return
         self.publish_point(self.pub_locked_point, point)
@@ -856,6 +909,7 @@ class VlmPortPoseNode(Node):
                 candidates,
                 selected_id=selected_candidate_id,
                 filter_note=filter_note,
+                image_shape=image_shape,
             )
         self.publish_ready(True)
         surface_text = ""
@@ -1199,6 +1253,7 @@ class VlmPortPoseNode(Node):
         selected_candidate_id=None,
         status: str,
         locked: bool,
+        not_found: bool = False,
     ):
         with self.lock:
             color = (
@@ -1334,8 +1389,15 @@ class VlmPortPoseNode(Node):
             (18, 22, 26),
             thickness=-1,
         )
-        state_text = "LOCKED" if locked else "SEARCHING"
-        state_color = (70, 220, 90) if locked else (0, 190, 255)
+        if locked:
+            state_text = "LOCKED"
+            state_color = (70, 220, 90)
+        elif not_found:
+            state_text = "TARGET NOT FOUND"
+            state_color = (40, 40, 255)
+        else:
+            state_text = "SEARCHING"
+            state_color = (0, 190, 255)
         cv2.putText(
             color,
             f"VLM RCM PORT  |  {state_text}",
@@ -2301,6 +2363,7 @@ class VlmPortPoseNode(Node):
     def on_mask(self, msg: Image):
         mask = image_to_mask(msg)
         with self.lock:
+            self.last_image_shape = mask.shape
             locked_point = (
                 None
                 if self.locked_point is None
@@ -2372,21 +2435,84 @@ class VlmPortPoseNode(Node):
                 locked=False,
             )
             return
-        if score < self.min_score:
-            self.publish_status(
-                f"SAM3 score {score:.3f} below {self.min_score:.3f}",
-                valid=False,
-            )
+        if int(np.count_nonzero(mask)) == 0:
+            with self.lock:
+                self.low_score_frame_count += 1
+                elapsed = max(
+                    0.0,
+                    time.time() - self.language_instruction_wall_time_sec,
+                )
+                if (
+                    self.low_score_frame_count >= self.target_not_found_min_frames
+                    and elapsed >= self.target_not_found_timeout_sec
+                ):
+                    self.target_not_found = True
+                not_found = self.target_not_found
+                empty_mask_frames = self.low_score_frame_count
+            if not_found:
+                status = (
+                    "target_not_found: "
+                    f"instruction={language_instruction!r}; "
+                    "SAM3 returned no target mask for "
+                    f"prompt={self.current_prompt!r}; best_score={score:.3f} "
+                    f"frames={empty_mask_frames}"
+                )
+            else:
+                status = (
+                    "searching: SAM3 returned an empty mask; "
+                    f"best_score={score:.3f} "
+                    f"({empty_mask_frames}/{self.target_not_found_min_frames})"
+                )
+            self.publish_status(status, valid=False)
             self.publish_overlay(
                 mask,
                 info,
-                status=(
-                    f"SAM3 score {score:.3f} below "
-                    f"{self.min_score:.3f}"
-                ),
+                status=status,
                 locked=False,
+                not_found=not_found,
             )
             return
+        if score < self.min_score:
+            with self.lock:
+                self.low_score_frame_count += 1
+                elapsed = max(
+                    0.0,
+                    time.time() - self.language_instruction_wall_time_sec,
+                )
+                if (
+                    self.low_score_frame_count >= self.target_not_found_min_frames
+                    and elapsed >= self.target_not_found_timeout_sec
+                ):
+                    self.target_not_found = True
+                not_found = self.target_not_found
+                low_score_frames = self.low_score_frame_count
+            if not_found:
+                status = (
+                    "target_not_found: "
+                    f"instruction={language_instruction!r}; "
+                    "SAM3 found no mask for "
+                    f"prompt={self.current_prompt!r}; best_score={score:.3f} "
+                    f"threshold={self.min_score:.3f} frames={low_score_frames}"
+                )
+            else:
+                status = (
+                    f"searching: SAM3 score {score:.3f} below "
+                    f"{self.min_score:.3f} "
+                    f"({low_score_frames}/{self.target_not_found_min_frames})"
+                )
+            self.publish_status(status, valid=False)
+            self.publish_overlay(
+                mask,
+                info,
+                status=status,
+                locked=False,
+                not_found=not_found,
+            )
+            return
+
+        with self.lock:
+            self.low_score_frame_count = 0
+            self.target_not_found = False
 
         if mask.shape != depth.shape:
             self.publish_status(

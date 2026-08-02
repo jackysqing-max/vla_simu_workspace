@@ -19,7 +19,6 @@ from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
 from std_msgs.msg import Bool, String
 
-
 def fmt_float(value, digits=4, default="n/a"):
     try:
         return f"{float(value):.{digits}f}"
@@ -31,9 +30,9 @@ class LocateCapture(Node):
     def __init__(
         self,
         *,
-        prompt_topic: str,
-        reset_topic: str,
         language_topic: str,
+        language_control_topic: str,
+        expected_instruction: str,
         ready_topic: str,
         status_topic: str,
         candidates_topic: str,
@@ -44,7 +43,11 @@ class LocateCapture(Node):
         super().__init__("vlm_rcm_locate_capture")
         self.language_topic = language_topic
         self.candidates_topic = candidates_topic
+        self.expected_instruction = expected_instruction
+        self.control_event = threading.Event()
+        self.control_payload = {}
         self.ready_event = threading.Event()
+        self.target_not_found_event = threading.Event()
         self.candidate_event = threading.Event()
         self.locked_point_event = threading.Event()
         self.locked_surface_axis_event = threading.Event()
@@ -54,10 +57,14 @@ class LocateCapture(Node):
         self.locked_point = None
         self.locked_surface_axis = None
 
-        self.pub_prompt = self.create_publisher(String, prompt_topic, 10)
-        self.pub_reset = self.create_publisher(Bool, reset_topic, 10)
         self.pub_language = self.create_publisher(String, language_topic, 10)
 
+        self.create_subscription(
+            String,
+            language_control_topic,
+            self.on_language_control,
+            10,
+        )
         self.create_subscription(Bool, ready_topic, self.on_ready, 10)
         self.create_subscription(String, status_topic, self.on_status, 10)
         self.create_subscription(String, candidates_topic, self.on_candidates, 10)
@@ -78,9 +85,49 @@ class LocateCapture(Node):
     def on_ready(self, msg: Bool):
         if msg.data:
             self.ready_event.set()
+        else:
+            self.ready_event.clear()
+
+    def on_language_control(self, msg: String):
+        try:
+            payload = json.loads(msg.data)
+        except Exception:
+            return
+        if payload.get("instruction") != self.expected_instruction:
+            return
+        if str(payload.get("action", "")).lower() == "locate":
+            self.ready_event.clear()
+            self.candidate_event.clear()
+            self.locked_point_event.clear()
+            self.locked_surface_axis_event.clear()
+            self.target_not_found_event.clear()
+            self.candidates_text = ""
+            self.verification_text = ""
+            self.locked_point = None
+            self.locked_surface_axis = None
+        self.control_payload = payload
+        self.control_event.set()
+        print(
+            "[LLM CONTROL] "
+            f"action={payload.get('action')} "
+            f"target={payload.get('target_description')} "
+            f"sam_prompt={payload.get('sam_prompt')}",
+            flush=True,
+        )
 
     def on_status(self, msg: String):
         self.status_text = msg.data
+        expected_marker = f"instruction={self.expected_instruction!r};"
+        if (
+            msg.data.startswith("target_not_found:")
+            and expected_marker in msg.data
+        ):
+            self.target_not_found_event.set()
+            print(f"[TARGET NOT FOUND] {msg.data}", flush=True)
+        if not self.control_event.is_set():
+            return
+        if "locked=true" in msg.data and not self.candidate_event.is_set():
+            return
         if (
             "candidate=" in msg.data
             or "locked=true" in msg.data
@@ -89,13 +136,21 @@ class LocateCapture(Node):
             print(f"[STATUS] {msg.data}", flush=True)
 
     def on_candidates(self, msg: String):
+        try:
+            payload = json.loads(msg.data)
+        except Exception:
+            return
+        if payload.get("language_instruction") != self.expected_instruction:
+            return
         self.candidates_text = msg.data
         self.candidate_event.set()
 
     def on_verification(self, msg: String):
-        self.verification_text = msg.data
         try:
             payload = json.loads(msg.data)
+            if payload.get("instruction") != self.expected_instruction:
+                return
+            self.verification_text = msg.data
             print(
                 "[VERIFY] "
                 f"{payload.get('decision')} "
@@ -138,23 +193,14 @@ class LocateCapture(Node):
             time.sleep(0.05)
         return self.count_publishers(self.candidates_topic) > 0
 
-    def publish_command(self, command: str, prompt: str, repeat_sec: float):
-        reset_msg = Bool()
-        reset_msg.data = True
-        prompt_msg = String()
-        prompt_msg.data = prompt
+    def publish_command(self, command: str, repeat_sec: float):
         language_msg = String()
         language_msg.data = command
 
         deadline = time.time() + max(repeat_sec, 0.0)
-        self.pub_reset.publish(reset_msg)
-        if prompt:
-            self.pub_prompt.publish(prompt_msg)
         self.pub_language.publish(language_msg)
         while time.time() < deadline:
             time.sleep(0.2)
-            if prompt:
-                self.pub_prompt.publish(prompt_msg)
             self.pub_language.publish(language_msg)
 
 
@@ -338,17 +384,15 @@ def pretty_print_result(
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", nargs="+", help="Language command for selecting a hole.")
-    parser.add_argument("--sam-prompt", default="circular hole")
-    parser.add_argument("--prompt-topic", default="/sam3/prompt")
-    parser.add_argument("--reset-topic", default="/vlm_rcm/reset_lock")
     parser.add_argument("--language-topic", default="/vlm_rcm/language_command")
+    parser.add_argument("--language-control-topic", default="/vlm_rcm/language_control")
     parser.add_argument("--ready-topic", default="/vlm_rcm/port_ready")
     parser.add_argument("--status-topic", default="/vlm_rcm/status")
     parser.add_argument("--candidates-topic", default="/vlm_rcm/hole_candidates")
     parser.add_argument("--verification-topic", default="/vlm_rcm/verification_result")
     parser.add_argument("--locked-point-topic", default="/vlm_rcm/locked_port_point")
     parser.add_argument("--locked-surface-axis-topic", default="/vlm_rcm/locked_surface_axis")
-    parser.add_argument("--timeout-sec", type=float, default=45.0)
+    parser.add_argument("--timeout-sec", type=float, default=90.0)
     parser.add_argument("--publish-warmup-sec", type=float, default=4.0)
     parser.add_argument("--publish-repeat-sec", type=float, default=1.0)
     return parser
@@ -360,9 +404,9 @@ def main(argv=None):
 
     rclpy.init()
     node = LocateCapture(
-        prompt_topic=args.prompt_topic,
-        reset_topic=args.reset_topic,
         language_topic=args.language_topic,
+        language_control_topic=args.language_control_topic,
+        expected_instruction=command,
         ready_topic=args.ready_topic,
         status_topic=args.status_topic,
         candidates_topic=args.candidates_topic,
@@ -384,10 +428,29 @@ def main(argv=None):
             print("[WARN] no /vlm_rcm/hole_candidates publisher discovered yet", flush=True)
         print(f"[SEND] {command}", flush=True)
         print("[INFO] perception-only locate; no robot start command is published", flush=True)
-        node.publish_command(command, args.sam_prompt, repeat_sec)
+        node.publish_command(command, repeat_sec)
 
         deadline = time.time() + max(args.timeout_sec, 0.0)
+        while time.time() < deadline and not node.control_event.is_set():
+            time.sleep(0.05)
+        if not node.control_event.is_set():
+            raise SystemExit("[ERROR] strict LLM produced no language control result")
+
+        control_action = str(node.control_payload.get("action", "")).lower()
+        if control_action == "unlock":
+            print("\n================ LOCK CONTROL ====================", flush=True)
+            print("RCM port lock cleared; waiting for a new target instruction.", flush=True)
+            if node.status_text:
+                print(f"status={node.status_text}", flush=True)
+            return
+        if control_action != "locate":
+            raise SystemExit(
+                f"[ERROR] strict LLM rejected instruction: action={control_action}"
+            )
+
         while time.time() < deadline:
+            if node.target_not_found_event.is_set():
+                raise SystemExit(f"[ERROR] {node.status_text}")
             if node.ready_event.is_set() and node.candidate_event.is_set():
                 break
             time.sleep(0.1)

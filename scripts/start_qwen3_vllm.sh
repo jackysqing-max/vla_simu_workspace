@@ -5,8 +5,11 @@ MODEL="${QWEN_MODEL:-Qwen/Qwen3-4B}"
 HOST="${QWEN3_HOST:-0.0.0.0}"
 PORT="${QWEN3_PORT:-8000}"
 TENSOR_PARALLEL_SIZE="${QWEN3_TENSOR_PARALLEL_SIZE:-1}"
-GPU_MEMORY_UTILIZATION="${QWEN3_GPU_MEMORY_UTILIZATION:-0.93}"
-MAX_MODEL_LEN="${QWEN3_MAX_MODEL_LEN:-32768}"
+# This workstation also runs SAM3 on the same 16 GiB GPU.  Conservative
+# defaults prevent vLLM from reserving nearly all VRAM when this helper is
+# launched directly instead of through the demo wrapper.
+GPU_MEMORY_UTILIZATION="${QWEN3_GPU_MEMORY_UTILIZATION:-0.55}"
+MAX_MODEL_LEN="${QWEN3_MAX_MODEL_LEN:-1792}"
 HF_HOME="${HF_HOME:-/home/siqin/ros2_workspaces/humble/.cache/huggingface}"
 HF_HUB_DISABLE_XET="${HF_HUB_DISABLE_XET:-1}"
 VLLM_BIN="${QWEN3_VLLM_BIN:-vllm}"
