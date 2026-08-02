@@ -150,6 +150,25 @@ SURGICAL_RCM_TASK_JSON_SCHEMA = {
         },
         "requested_insertion_depth_m": {"type": "number"},
         "approach_preference": {"type": "string"},
+        "approach_constraint": {
+            "type": "object",
+            "properties": {
+                "mode": {
+                    "type": "string",
+                    "enum": ["auto_closest_reachable", "preferred_cone_angle"],
+                },
+                "cone_half_angle_deg": {"type": "number"},
+                "preferred_tilt_deg": {"type": ["number", "null"]},
+                "preferred_azimuth_deg": {"type": ["number", "null"]},
+            },
+            "required": [
+                "mode",
+                "cone_half_angle_deg",
+                "preferred_tilt_deg",
+                "preferred_azimuth_deg",
+            ],
+            "additionalProperties": False,
+        },
         "verification": {
             "type": "object",
             "additionalProperties": True,
@@ -160,6 +179,7 @@ SURGICAL_RCM_TASK_JSON_SCHEMA = {
         "objective_text",
         "allow_alternative",
         "terminal_operation",
+        "approach_constraint",
     ],
     "additionalProperties": False,
 }
@@ -479,6 +499,37 @@ def sanitize_rcm_task_request(raw_task: dict, *, fallback_instruction: str = "")
     selected_candidate_id = task.get("selected_candidate_id", None)
     if selected_candidate_id is not None:
         selected_candidate_id = str(selected_candidate_id).strip() or None
+    raw_constraint = task.get("approach_constraint", {})
+    if not isinstance(raw_constraint, dict):
+        raw_constraint = {}
+    mode = str(
+        raw_constraint.get("mode", "auto_closest_reachable")
+    ).strip()
+    if mode not in {"auto_closest_reachable", "preferred_cone_angle"}:
+        mode = "auto_closest_reachable"
+    half_angle_deg = min(
+        max(_positive_float(raw_constraint.get("cone_half_angle_deg", 20.0), 20.0), 1.0),
+        45.0,
+    )
+    preferred_tilt = raw_constraint.get("preferred_tilt_deg", None)
+    preferred_azimuth = raw_constraint.get("preferred_azimuth_deg", None)
+    try:
+        preferred_tilt = None if preferred_tilt is None else float(preferred_tilt)
+        preferred_azimuth = None if preferred_azimuth is None else float(preferred_azimuth)
+    except (TypeError, ValueError):
+        preferred_tilt = None
+        preferred_azimuth = None
+    if (
+        mode != "preferred_cone_angle"
+        or preferred_tilt is None
+        or preferred_azimuth is None
+    ):
+        mode = "auto_closest_reachable"
+        preferred_tilt = None
+        preferred_azimuth = None
+    else:
+        preferred_tilt = min(max(preferred_tilt, 0.0), half_angle_deg)
+        preferred_azimuth = preferred_azimuth % 360.0
     return {
         "instruction": instruction,
         "objective_text": objective_text,
@@ -493,6 +544,12 @@ def sanitize_rcm_task_request(raw_task: dict, *, fallback_instruction: str = "")
             0.0,
         ),
         "approach_preference": str(task.get("approach_preference", "")).strip(),
+        "approach_constraint": {
+            "mode": mode,
+            "cone_half_angle_deg": half_angle_deg,
+            "preferred_tilt_deg": preferred_tilt,
+            "preferred_azimuth_deg": preferred_azimuth,
+        },
         "verification": verification,
     }
 

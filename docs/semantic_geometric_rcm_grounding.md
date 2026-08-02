@@ -24,6 +24,10 @@ The new runtime separates responsibilities:
 5. `surgical_rcm_task_executor_node` consumes a high-level RCM task request. It
    still uses fixed internal safety stages, but those stages are no longer
    serialized as if the LLM had planned them.
+6. After the port locks, `rcm_virtual_fixture_node` treats its inward axis as the
+   center of an admissible approach cone. It samples continuous-axis candidates,
+   checks the pre-insertion, port-standoff, and inserted poses with IK plus FK
+   error gates, and freezes one axis before motion starts.
 
 The candidate IDs are observation-dependent labels such as `H1`, `H2`, `H10`.
 They are not semantic slots and the pipeline does not assume exactly nine holes.
@@ -68,6 +72,8 @@ Important topics:
 /vlm_rcm/verified_selected_port
 /vlm_rcm/locked_port_point
 /vlm_rcm/port_ready
+/rcm_virtual_fixtures/approach_constraint_json
+/rcm_virtual_fixtures/approach_selection_json
 ```
 
 Launch perception-only grounding:
@@ -96,6 +102,12 @@ The high-level LLM task request for the full demo now looks like:
   "terminal_operation": "execute_rcm_circle",
   "requested_insertion_depth_m": 0.0,
   "approach_preference": "",
+  "approach_constraint": {
+    "mode": "auto_closest_reachable",
+    "cone_half_angle_deg": 20.0,
+    "preferred_tilt_deg": null,
+    "preferred_azimuth_deg": null
+  },
   "verification": {
     "decision": "PENDING"
   }
@@ -105,3 +117,14 @@ The high-level LLM task request for the full demo now looks like:
 The finite controller stages remain inside the executor because they are a safety
 boundary. They do not reduce the open semantic grounding problem to a fixed
 nine-cell ontology.
+
+For `auto_closest_reachable`, the deterministic controller chooses the reachable
+cone axis whose pre-insertion IK solution has the smallest RMS joint displacement
+from the current robot state. If the instruction explicitly contains numerical
+tilt and azimuth, Qwen emits `preferred_cone_angle`; the controller searches for
+the closest reachable direction to that preference while keeping it inside the
+cone. Directional words are not converted by local keyword tables. The PyBullet
+GUI draws the outward-opening admissible cone in orange and the chosen approach
+axis in blue. `NO_REACHABLE_AXIS` blocks motion. Current feasibility covers joint
+limits and kinematic tracking errors; environment collision checking is still a
+separate required gate before transferring this demo to physical hardware.

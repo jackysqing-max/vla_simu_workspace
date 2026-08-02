@@ -17,6 +17,7 @@ drop-in torque-level Franka controller.
 from __future__ import annotations
 
 import csv
+import json
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,6 +33,13 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, Float64MultiArray, Int8, String
+
+from .approach_cone import (
+    angular_distance_deg,
+    axis_at_cone_angles,
+    sample_cone_axes,
+    wrapped_joint_distance,
+)
 
 
 IIWA_LOWER_LIMITS = [
@@ -283,6 +291,15 @@ class RcmVirtualFixtureNode(Node):
             self.locked_port_axis_topic,
             10,
         )
+        self.pub_approach_selection = self.create_publisher(
+            String,
+            self.approach_selection_topic,
+            qos_profile=QoSProfile(
+                depth=1,
+                durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                reliability=ReliabilityPolicy.RELIABLE,
+            ),
+        )
 
         self.latest_q = None
         self.latest_qdot = None
@@ -290,6 +307,13 @@ class RcmVirtualFixtureNode(Node):
         self.visual_port_axis = None
         self.visual_port_ready = not self.use_vlm_port_pose
         self.visual_pose_rejection = ""
+        self.approach_constraint = {
+            "mode": "auto_closest_reachable",
+            "cone_half_angle_deg": self.approach_cone_half_angle_deg,
+            "preferred_tilt_deg": None,
+            "preferred_azimuth_deg": None,
+        }
+        self.approach_search_failed = False
         self.start_requested = not self.wait_for_start_command
         self.pivot_requested = not self.wait_for_pivot_command
         self.held_rcm_target = None
@@ -300,6 +324,12 @@ class RcmVirtualFixtureNode(Node):
             reliability=ReliabilityPolicy.RELIABLE,
         )
         self.create_subscription(Bool, self.init_done_topic, self.on_init_done, qos_latch)
+        self.create_subscription(
+            String,
+            self.approach_constraint_topic,
+            self.on_approach_constraint,
+            qos_latch,
+        )
         self.create_subscription(JointState, self.joint_states_topic, self.on_joint_states, 10)
         if self.use_vlm_port_pose:
             self.create_subscription(
@@ -470,6 +500,21 @@ class RcmVirtualFixtureNode(Node):
             [0.335067, 0.0, -0.942194],
         )
         self.declare_parameter("visual_port_max_axis_angle_deg", 25.0)
+        self.declare_parameter("enable_approach_cone", True)
+        self.declare_parameter("approach_cone_half_angle_deg", 20.0)
+        self.declare_parameter("approach_cone_radial_samples", 4)
+        self.declare_parameter("approach_cone_azimuth_samples", 16)
+        self.declare_parameter("approach_ik_position_tolerance_m", 0.008)
+        self.declare_parameter("approach_ik_axis_tolerance_deg", 6.0)
+        self.declare_parameter("approach_joint_limit_margin_rad", 0.02)
+        self.declare_parameter(
+            "approach_constraint_topic",
+            "/rcm_virtual_fixtures/approach_constraint_json",
+        )
+        self.declare_parameter(
+            "approach_selection_topic",
+            "/rcm_virtual_fixtures/approach_selection_json",
+        )
         self.declare_parameter("enable_safe_insertion", False)
         self.declare_parameter("preinsert_clearance_m", 0.040)
         self.declare_parameter("port_standoff_m", 0.012)
@@ -591,6 +636,40 @@ class RcmVirtualFixtureNode(Node):
                 1.0,
                 90.0,
             )
+        )
+        self.enable_approach_cone = bool(
+            self.get_parameter("enable_approach_cone").value
+        )
+        self.approach_cone_half_angle_deg = float(
+            np.clip(
+                float(self.get_parameter("approach_cone_half_angle_deg").value),
+                1.0,
+                45.0,
+            )
+        )
+        self.approach_cone_radial_samples = max(
+            int(self.get_parameter("approach_cone_radial_samples").value), 1
+        )
+        self.approach_cone_azimuth_samples = max(
+            int(self.get_parameter("approach_cone_azimuth_samples").value), 4
+        )
+        self.approach_ik_position_tolerance_m = max(
+            float(self.get_parameter("approach_ik_position_tolerance_m").value),
+            0.001,
+        )
+        self.approach_ik_axis_tolerance_deg = max(
+            float(self.get_parameter("approach_ik_axis_tolerance_deg").value),
+            0.5,
+        )
+        self.approach_joint_limit_margin_rad = max(
+            float(self.get_parameter("approach_joint_limit_margin_rad").value),
+            0.0,
+        )
+        self.approach_constraint_topic = str(
+            self.get_parameter("approach_constraint_topic").value
+        )
+        self.approach_selection_topic = str(
+            self.get_parameter("approach_selection_topic").value
         )
         if self.use_vlm_port_pose and self.use_initial_rcm:
             self.get_logger().warning(
@@ -832,6 +911,54 @@ class RcmVirtualFixtureNode(Node):
             self._publish_started(False)
         self._publish_stage()
 
+    def on_approach_constraint(self, msg: String):
+        """Accept planner geometry without interpreting natural language locally."""
+        try:
+            raw = json.loads(msg.data)
+        except (json.JSONDecodeError, TypeError) as exc:
+            self.get_logger().warning(f"[APPROACH_CONE] invalid JSON: {exc}")
+            return
+        if not isinstance(raw, dict):
+            return
+        mode = str(raw.get("mode", "auto_closest_reachable")).strip()
+        if mode not in {"auto_closest_reachable", "preferred_cone_angle"}:
+            mode = "auto_closest_reachable"
+        try:
+            half_angle = float(
+                raw.get("cone_half_angle_deg", self.approach_cone_half_angle_deg)
+            )
+        except (TypeError, ValueError):
+            half_angle = self.approach_cone_half_angle_deg
+        half_angle = float(np.clip(half_angle, 1.0, 45.0))
+        try:
+            tilt = raw.get("preferred_tilt_deg", None)
+            azimuth = raw.get("preferred_azimuth_deg", None)
+            tilt = None if tilt is None else float(tilt)
+            azimuth = None if azimuth is None else float(azimuth)
+        except (TypeError, ValueError):
+            tilt = None
+            azimuth = None
+        if mode != "preferred_cone_angle" or tilt is None or azimuth is None:
+            mode = "auto_closest_reachable"
+            tilt = None
+            azimuth = None
+        else:
+            tilt = float(np.clip(tilt, 0.0, half_angle))
+            azimuth %= 360.0
+        self.approach_constraint = {
+            "mode": mode,
+            "cone_half_angle_deg": half_angle,
+            "preferred_tilt_deg": tilt,
+            "preferred_azimuth_deg": azimuth,
+        }
+        self.approach_search_failed = False
+        self.get_logger().info(
+            "[APPROACH_CONE] constraint received: "
+            f"mode={mode} half_angle={half_angle:.1f}deg "
+            f"preferred=({tilt},{azimuth})"
+        )
+        self._try_lock_initial_state()
+
     def on_pivot_start_command(self, msg: Bool):
         self.pivot_requested = bool(msg.data)
         if (
@@ -892,6 +1019,7 @@ class RcmVirtualFixtureNode(Node):
             self.visual_pose_rejection = "port point contains non-finite values"
             return
         self.visual_port_point = point
+        self.approach_search_failed = False
         self._try_lock_initial_state()
 
     def on_visual_port_axis(self, msg: Vector3Stamped):
@@ -921,6 +1049,7 @@ class RcmVirtualFixtureNode(Node):
         if float(np.dot(axis, self.visual_port_reference_axis)) < 0.0:
             axis = -axis
         self.visual_port_axis = axis
+        self.approach_search_failed = False
         self._try_lock_initial_state()
 
     def on_visual_port_ready(self, msg: Bool):
@@ -973,9 +1102,162 @@ class RcmVirtualFixtureNode(Node):
             )
         return True, ""
 
+    def _publish_approach_selection(self, payload: dict):
+        msg = String()
+        msg.data = json.dumps(payload, ensure_ascii=False)
+        self.pub_approach_selection.publish(msg)
+
+    def _select_cone_approach_axis(
+        self,
+        center_axis: np.ndarray,
+        port_point: np.ndarray,
+        q_reference: list[float],
+        preferred_x: np.ndarray,
+    ):
+        """Choose an IK-reachable inward axis from the admissible cone."""
+        constraint = self.approach_constraint
+        half_angle = float(constraint["cone_half_angle_deg"])
+        samples = sample_cone_axes(
+            center_axis,
+            half_angle,
+            self.approach_cone_radial_samples,
+            self.approach_cone_azimuth_samples,
+        )
+        preferred_axis = None
+        if constraint["mode"] == "preferred_cone_angle":
+            preferred_axis = axis_at_cone_angles(
+                center_axis,
+                constraint["preferred_tilt_deg"],
+                constraint["preferred_azimuth_deg"],
+            )
+            samples.insert(
+                0,
+                (
+                    preferred_axis,
+                    float(constraint["preferred_tilt_deg"]),
+                    float(constraint["preferred_azimuth_deg"]),
+                ),
+            )
+
+        reachable = []
+        for axis, tilt_deg, azimuth_deg in samples:
+            desired_quat = quaternion_from_matrix(
+                rotation_matrix_from_z_axis(axis, preferred_x=preferred_x)
+            )
+            lower = np.asarray(IIWA_LOWER_LIMITS) + self.approach_joint_limit_margin_rad
+            upper = np.asarray(IIWA_UPPER_LIMITS) - self.approach_joint_limit_margin_rad
+            waypoint_offsets = (
+                -self.preinsert_clearance_m,
+                -self.port_standoff_m,
+                (1.0 - self.rcm_lambda) * self.tool_length_m,
+            )
+            waypoint_seed = q_reference
+            waypoint_solutions = []
+            position_errors = []
+            axis_errors = []
+            path_reachable = True
+            for tip_offset in waypoint_offsets:
+                desired_tip = port_point + tip_offset * axis
+                desired_ee = desired_tip - self.tool_length_m * axis
+                q_solution = self.model.solve_ik(
+                    waypoint_seed,
+                    desired_ee,
+                    desired_quat,
+                    q_reference,
+                    self.joint_damping,
+                    self.ik_max_iterations,
+                    self.ik_residual_threshold,
+                )
+                q_array = np.asarray(q_solution, dtype=np.float64)
+                if (
+                    not np.all(np.isfinite(q_array))
+                    or np.any(q_array < lower)
+                    or np.any(q_array > upper)
+                ):
+                    path_reachable = False
+                    break
+                actual_ee, actual_quat = self.model.fk(q_solution)
+                position_error = float(np.linalg.norm(actual_ee - desired_ee))
+                actual_axis = quat_to_matrix_xyzw(actual_quat)[:, 2]
+                axis_error = angular_distance_deg(actual_axis, axis)
+                if (
+                    position_error > self.approach_ik_position_tolerance_m
+                    or axis_error > self.approach_ik_axis_tolerance_deg
+                ):
+                    path_reachable = False
+                    break
+                waypoint_solutions.append(q_solution)
+                position_errors.append(position_error)
+                axis_errors.append(axis_error)
+                waypoint_seed = q_solution
+            if not path_reachable:
+                continue
+            joint_motion = wrapped_joint_distance(
+                waypoint_solutions[0], q_reference
+            )
+            preference_error = (
+                angular_distance_deg(axis, preferred_axis)
+                if preferred_axis is not None
+                else 0.0
+            )
+            score = (
+                (preference_error, joint_motion, tilt_deg)
+                if preferred_axis is not None
+                else (joint_motion, tilt_deg, position_error)
+            )
+            reachable.append(
+                {
+                    "score": score,
+                    "axis": axis,
+                    "tilt_deg": float(tilt_deg),
+                    "azimuth_deg": float(azimuth_deg),
+                    "q": waypoint_solutions[0],
+                    "joint_motion_rad_rms": joint_motion,
+                    "position_error_m": max(position_errors),
+                    "axis_error_deg": max(axis_errors),
+                }
+            )
+
+        if not reachable:
+            self._publish_approach_selection(
+                {
+                    "schema_version": "rcm_approach_selection.v1",
+                    "status": "NO_REACHABLE_AXIS",
+                    "mode": constraint["mode"],
+                    "port_point": port_point.tolist(),
+                    "center_axis": center_axis.tolist(),
+                    "cone_half_angle_deg": half_angle,
+                    "sample_count": len(samples),
+                }
+            )
+            return None
+
+        selected = min(reachable, key=lambda candidate: candidate["score"])
+        self._publish_approach_selection(
+            {
+                "schema_version": "rcm_approach_selection.v1",
+                "status": "SELECTED",
+                "mode": constraint["mode"],
+                "port_point": port_point.tolist(),
+                "center_axis": center_axis.tolist(),
+                "cone_outward_axis": (-center_axis).tolist(),
+                "cone_half_angle_deg": half_angle,
+                "selected_axis": selected["axis"].tolist(),
+                "selected_tilt_deg": selected["tilt_deg"],
+                "selected_azimuth_deg": selected["azimuth_deg"],
+                "joint_motion_rad_rms": selected["joint_motion_rad_rms"],
+                "position_error_m": selected["position_error_m"],
+                "axis_error_deg": selected["axis_error_deg"],
+                "sample_count": len(samples),
+                "reachable_count": len(reachable),
+            }
+        )
+        return selected
+
     def _try_lock_initial_state(self):
         if (
             self.locked
+            or self.approach_search_failed
             or not self.start_requested
             or not self.init_done
             or self.latest_q is None
@@ -1012,6 +1294,25 @@ class RcmVirtualFixtureNode(Node):
 
         if self.use_vlm_port_pose:
             shaft = self.visual_port_axis.copy()
+            if self.enable_approach_cone:
+                selection = self._select_cone_approach_axis(
+                    shaft,
+                    self.rcm0,
+                    self.q0,
+                    self.tool_frame_x0,
+                )
+                if selection is None:
+                    self.approach_search_failed = True
+                    self.visual_pose_rejection = (
+                        "no IK-reachable approach axis inside admissible cone"
+                    )
+                    self.motion_stage = "NO_REACHABLE_APPROACH"
+                    self._publish_stage()
+                    self.get_logger().error(
+                        "[APPROACH_CONE] no reachable pre-insertion pose; motion blocked"
+                    )
+                    return
+                shaft = selection["axis"].copy()
             aligned_rotation = rotation_matrix_from_z_axis(
                 shaft,
                 preferred_x=self.tool_frame_x0,

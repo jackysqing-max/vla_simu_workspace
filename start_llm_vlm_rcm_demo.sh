@@ -205,17 +205,20 @@ ensure_planning_nodes() {
 }
 
 start_execution_runtime() {
-  QWEN_VL_MODEL="$QWEN_MODEL" \
-  QWEN_VL_API_BASE_URL="http://127.0.0.1:$QWEN3_PORT/v1/chat/completions" \
-  QWEN_VL_API_KEY="EMPTY" \
-  QWEN_VL_INPUT_MODE="$QWEN_VL_INPUT_MODE" \
-  QWEN_VL_ENABLE_LOCAL_FALLBACK="$QWEN_VL_ENABLE_LOCAL_FALLBACK" \
-  QWEN_VL_RETRY_TEXT_WITHOUT_IMAGES="$QWEN_VL_RETRY_TEXT_WITHOUT_IMAGES" \
-  VLM_RCM_START_SEMANTIC_GROUNDER=true \
-  VLM_RCM_SHOW_TOOL=true \
-  VLM_RCM_SHOW_DVRK_LND=true \
-  VLM_RCM_TOOL_LENGTH_M="$RCM_TOOL_LENGTH_M" \
-    ./start_vlm_rcm_port_perception_demo.sh start
+  local start_perception="${1:-true}"
+  if [[ "$start_perception" == "true" ]]; then
+    QWEN_VL_MODEL="$QWEN_MODEL" \
+    QWEN_VL_API_BASE_URL="http://127.0.0.1:$QWEN3_PORT/v1/chat/completions" \
+    QWEN_VL_API_KEY="EMPTY" \
+    QWEN_VL_INPUT_MODE="$QWEN_VL_INPUT_MODE" \
+    QWEN_VL_ENABLE_LOCAL_FALLBACK="$QWEN_VL_ENABLE_LOCAL_FALLBACK" \
+    QWEN_VL_RETRY_TEXT_WITHOUT_IMAGES="$QWEN_VL_RETRY_TEXT_WITHOUT_IMAGES" \
+    VLM_RCM_START_SEMANTIC_GROUNDER=true \
+    VLM_RCM_SHOW_TOOL=true \
+    VLM_RCM_SHOW_DVRK_LND=true \
+    VLM_RCM_TOOL_LENGTH_M="$RCM_TOOL_LENGTH_M" \
+      ./start_vlm_rcm_port_perception_demo.sh start
+  fi
 
   start_bg_ros llm_vlm_rcm_controller \
     "ros2 run rcm_virtual_fixtures rcm_virtual_fixture_node --ros-args \
@@ -233,6 +236,12 @@ start_execution_runtime() {
      -p visual_port_max_offset_m:=$RCM_VISUAL_PORT_MAX_OFFSET_M \
      -p visual_port_reference_axis:='[0.335067,0.0,-0.942194]' \
      -p visual_port_max_axis_angle_deg:=12.0 \
+     -p enable_approach_cone:=true \
+     -p approach_cone_half_angle_deg:=20.0 \
+     -p approach_cone_radial_samples:=4 \
+     -p approach_cone_azimuth_samples:=16 \
+     -p approach_ik_position_tolerance_m:=0.008 \
+     -p approach_ik_axis_tolerance_deg:=6.0 \
      -p preinsert_clearance_m:=$RCM_PREINSERT_CLEARANCE_M \
      -p wait_for_start_command:=true \
      -p wait_for_pivot_command:=true \
@@ -349,6 +358,13 @@ case "${1:-start}" in
       echo "[INFO] planning complete; GPU released for SAM3"
       start_execution_runtime
       echo "[OK] execution runtime started from the retained task plan"
+    else
+      controller_pid="$(cat "$PID_DIR/llm_vlm_rcm_controller.pid" 2>/dev/null || true)"
+      if ! pid_alive "$controller_pid"; then
+        echo "[INFO] controller missing after locate-only mode; starting controller"
+        start_execution_runtime false
+        echo "[OK] RCM controller started without restarting perception"
+      fi
     fi
     ;;
   locate)
@@ -368,8 +384,8 @@ case "${1:-start}" in
       QWEN_VL_API_BASE_URL="http://127.0.0.1:$QWEN3_PORT/v1/chat/completions" \
       QWEN_VL_INPUT_MODE=text \
       QWEN_VL_ENABLE_LOCAL_FALLBACK=false \
-      VLM_RCM_SHOW_TOOL=false \
-      VLM_RCM_SHOW_DVRK_LND=false \
+      VLM_RCM_SHOW_TOOL=true \
+      VLM_RCM_SHOW_DVRK_LND=true \
       ./start_vlm_rcm_port_perception_demo.sh start; then
       stop_named_process llm_vlm_rcm_qwen3
       echo "[ERROR] locate startup failed; Qwen and partial perception processes were stopped" >&2

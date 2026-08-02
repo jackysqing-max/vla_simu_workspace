@@ -322,7 +322,13 @@ class LlmTaskPlanner(Node):
                 "Do not output joint angles, torques, Cartesian poses, tool paths, "
                 "or arbitrary executable robot commands. The dynamic port candidate "
                 "selection will be grounded later by a Qwen-VL semantic grounder "
-                "using the marked camera image and candidate geometry."
+                "using the marked camera image and candidate geometry. For "
+                "approach_constraint use auto_closest_reachable unless the user "
+                "explicitly supplies both a numerical tilt and azimuth. Then use "
+                "preferred_cone_angle and preserve those values. Tilt is measured "
+                "away from the detected inward hole axis; azimuth is in the "
+                "controller's port-local cone frame. Never infer joint angles or "
+                "a Cartesian robot pose from directional words."
             )
         if self.open_vocabulary_targets:
             if self.enable_grasp_actions:

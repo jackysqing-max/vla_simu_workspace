@@ -12,7 +12,7 @@ SAM3_INFER_HZ="${SAM3_INFER_HZ:-1.0}"
 SAM3_MAX_SIDE="${SAM3_MAX_SIDE:-640}"
 SAM3_SCORE_TH="${SAM3_SCORE_TH:-0.05}"
 SAM3_MASK_TH="${SAM3_MASK_TH:-0.35}"
-SAM3_MIN_FREE_GPU_MIB="${SAM3_MIN_FREE_GPU_MIB:-6200}"
+SAM3_MIN_FREE_GPU_MIB="${SAM3_MIN_FREE_GPU_MIB:-5500}"
 
 VLM_RCM_GUI="${VLM_RCM_GUI:-true}"
 VLM_RCM_DISPLAY_OVERLAY="${VLM_RCM_DISPLAY_OVERLAY:-true}"
@@ -139,6 +139,15 @@ wait_for_topic() {
   return 1
 }
 
+wait_for_image_frame() {
+  local topic="$1"
+  local timeout_sec="${2:-20}"
+  timeout "${timeout_sec}s" ros2 topic echo \
+    --once \
+    --qos-reliability best_effort \
+    "$topic" >/dev/null 2>&1
+}
+
 stop_all() {
   local pid_file
   for pid_file in "$PID_DIR"/vlm_rcm_port_*.pid; do
@@ -200,7 +209,8 @@ case "${1:-start}" in
     fi
 
     start_bg_ros vlm_rcm_port_sim \
-      "ros2 run pybullet_ros2_sim iiwa_pybullet_sim_node --ros-args \
+      "env __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia \
+       ros2 run pybullet_ros2_sim iiwa_pybullet_sim_node --ros-args \
        -p gui:=$VLM_RCM_GUI \
        -p use_goto:=true \
        -p init_q:='[0.0,0.462931412,0.0,-1.132967496,0.0,1.204016934,0.0]' \
@@ -262,6 +272,12 @@ case "${1:-start}" in
       stop_all
       exit 1
     fi
+    if ! wait_for_image_frame /sim/camera/color/image_raw 25; then
+      echo "[ERROR] RGB-D camera topic exists but no image frame was published" >&2
+      echo "        PyBullet GUI/render initialization did not complete." >&2
+      stop_all
+      exit 1
+    fi
 
     start_bg_ros vlm_rcm_port_pose \
        "ros2 run rcm_virtual_fixtures vlm_port_pose_node --ros-args \
@@ -306,7 +322,7 @@ case "${1:-start}" in
 	         -p require_post_instruction_candidates:=true \
 	         -p require_scoring_program:=true \
 	         -p min_model_margin:=0.08 \
-	         -p min_expression_margin:=0.000001"
+	         -p min_expression_margin:=0.05"
 	    fi
 
 	    start_bg_sam3

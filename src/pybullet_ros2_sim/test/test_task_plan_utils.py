@@ -44,3 +44,25 @@ def test_empty_rcm_instruction_does_not_start_motion():
 
     assert task["terminal_operation"] == "stop"
     assert task["verification"]["decision"] == "REJECT"
+
+
+def test_rcm_approach_constraint_is_numeric_and_bounded():
+    task = sanitize_rcm_task_request(
+        {
+            "instruction": "use tilt 18 degrees and azimuth 450 degrees",
+            "objective_text": "specified approach",
+            "allow_alternative": False,
+            "terminal_operation": "establish_rcm",
+            "approach_constraint": {
+                "mode": "preferred_cone_angle",
+                "cone_half_angle_deg": 15.0,
+                "preferred_tilt_deg": 18.0,
+                "preferred_azimuth_deg": 450.0,
+            },
+        }
+    )
+
+    constraint = task["approach_constraint"]
+    assert constraint["mode"] == "preferred_cone_angle"
+    assert constraint["preferred_tilt_deg"] == 15.0
+    assert constraint["preferred_azimuth_deg"] == 90.0

@@ -58,6 +58,10 @@ class SurgicalRcmTaskExecutor(Node):
             "controller_status_topic",
             "/rcm_virtual_fixtures/status",
         )
+        self.declare_parameter(
+            "approach_constraint_topic",
+            "/rcm_virtual_fixtures/approach_constraint_json",
+        )
         self.declare_parameter("status_topic", "/surgical_rcm/status")
         self.declare_parameter(
             "camera_enable_topic",
@@ -99,6 +103,9 @@ class SurgicalRcmTaskExecutor(Node):
         )
         self.controller_status_topic = str(
             self.get_parameter("controller_status_topic").value
+        )
+        self.approach_constraint_topic = str(
+            self.get_parameter("approach_constraint_topic").value
         )
         self.status_topic = str(self.get_parameter("status_topic").value)
         self.camera_enable_topic = str(
@@ -147,6 +154,11 @@ class SurgicalRcmTaskExecutor(Node):
         self.pub_controller_pivot_hold = self.create_publisher(
             Bool,
             self.controller_pivot_hold_topic,
+            qos_latched,
+        )
+        self.pub_approach_constraint = self.create_publisher(
+            String,
+            self.approach_constraint_topic,
             qos_latched,
         )
         self.pub_status = self.create_publisher(
@@ -254,6 +266,14 @@ class SurgicalRcmTaskExecutor(Node):
         msg.data = bool(enabled)
         self.pub_camera_enable.publish(msg)
 
+    def _publish_approach_constraint(self, task: dict):
+        msg = String()
+        msg.data = json.dumps(
+            task.get("approach_constraint", {}),
+            ensure_ascii=False,
+        )
+        self.pub_approach_constraint.publish(msg)
+
     def _publish_language_command(self, command: str):
         msg = String()
         msg.data = str(command)
@@ -338,6 +358,7 @@ class SurgicalRcmTaskExecutor(Node):
         self._publish_controller_start(False)
         self._publish_controller_pivot_start(False)
         self._publish_controller_pivot_hold(False)
+        self._publish_approach_constraint(plan)
         self._publish_camera_enable(True)
         if not steps:
             self.plan_complete = True

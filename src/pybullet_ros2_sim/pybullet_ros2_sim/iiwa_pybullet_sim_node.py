@@ -93,6 +93,7 @@ class IiwaPybulletSim(Node):
         self.latest_port_candidates = []
         self.latest_port_candidates_time = 0.0
         self.latest_port_pose_time = 0.0
+        self.latest_approach_selection = None
 
         self.pub_js = self.create_publisher(JointState, "/iiwa7/joint_states", 10)
         self.camera = None
@@ -203,6 +204,13 @@ class IiwaPybulletSim(Node):
                 String,
                 self.port_candidates_topic,
                 self.on_port_candidates,
+                qos_latch,
+                callback_group=self.cb_sub,
+            )
+            self.sub_approach_selection = self.create_subscription(
+                String,
+                self.approach_selection_topic,
+                self.on_approach_selection,
                 qos_latch,
                 callback_group=self.cb_sub,
             )
@@ -410,6 +418,10 @@ class IiwaPybulletSim(Node):
             "port_candidates_topic",
             "/vlm_rcm/hole_candidates",
         )
+        self.declare_parameter(
+            "approach_selection_topic",
+            "/rcm_virtual_fixtures/approach_selection_json",
+        )
         self.declare_parameter("port_overlay_max_age_sec", 2.0)
         self.declare_parameter("port_overlay_ring_radius_m", 0.010)
         self.declare_parameter("port_overlay_axis_outside_m", 0.050)
@@ -600,6 +612,9 @@ class IiwaPybulletSim(Node):
         )
         self.port_candidates_topic = str(
             self.get_parameter("port_candidates_topic").value
+        )
+        self.approach_selection_topic = str(
+            self.get_parameter("approach_selection_topic").value
         )
         self.port_overlay_max_age_sec = max(
             float(self.get_parameter("port_overlay_max_age_sec").value),
@@ -946,6 +961,16 @@ class IiwaPybulletSim(Node):
                 self.get_clock().now().nanoseconds * 1e-9
             )
 
+    def on_approach_selection(self, msg: String):
+        try:
+            payload = json.loads(msg.data)
+        except json.JSONDecodeError:
+            return
+        if not isinstance(payload, dict):
+            return
+        with self._lock:
+            self.latest_approach_selection = payload
+
     def set_mode(self, new_mode: int):
         with self._lock:
             old_mode = self.control_mode
@@ -1015,6 +1040,10 @@ class IiwaPybulletSim(Node):
         self.port_ring_line_ids = []
         self.port_axis_line_ids = []
         self.port_surface_axis_line_ids = []
+        self.approach_cone_line_ids = []
+        self.approach_selected_axis_line_id = -1
+        self.approach_cone_label_id = -1
+        self.approach_overlay_signature = None
         self.port_candidate_label_ids = []
         self.port_center_marker_body_id = None
         self.port_candidate_marker_visual_shape_id = None
@@ -1498,6 +1527,105 @@ class IiwaPybulletSim(Node):
         self.port_overlay_signature = signature
         self.port_overlay_visible = True
 
+    def _update_approach_cone_overlay(self, payload):
+        """Draw the outward-opening cone and selected inward tool axis."""
+        if not isinstance(payload, dict):
+            return
+        point = payload.get("port_point")
+        center_axis = payload.get("center_axis")
+        if not isinstance(point, list) or not isinstance(center_axis, list):
+            return
+        if len(point) != 3 or len(center_axis) != 3:
+            return
+        status = str(payload.get("status", ""))
+        half_angle_deg = float(payload.get("cone_half_angle_deg", 0.0))
+        selected_axis = payload.get("selected_axis")
+        signature_values = [*point, *center_axis, half_angle_deg]
+        if isinstance(selected_axis, list) and len(selected_axis) == 3:
+            signature_values += selected_axis
+        signature_values.append(1.0 if status == "SELECTED" else 0.0)
+        signature = tuple(round(float(value), 5) for value in signature_values)
+        if signature == self.approach_overlay_signature:
+            return
+
+        def unit(vector):
+            norm = max(sum(value * value for value in vector) ** 0.5, 1e-9)
+            return [value / norm for value in vector]
+
+        def cross(first, second):
+            return [
+                first[1] * second[2] - first[2] * second[1],
+                first[2] * second[0] - first[0] * second[2],
+                first[0] * second[1] - first[1] * second[0],
+            ]
+
+        inward = unit(center_axis)
+        outward = [-value for value in inward]
+        reference = [0.0, 0.0, 1.0]
+        if abs(sum(outward[index] * reference[index] for index in range(3))) > 0.9:
+            reference = [1.0, 0.0, 0.0]
+        basis_1 = unit(cross(reference, outward))
+        basis_2 = unit(cross(outward, basis_1))
+        length = 0.11
+        tilt = math.radians(half_angle_deg)
+        boundary = []
+        segment_count = 16
+        for index in range(segment_count):
+            angle = 2.0 * math.pi * index / segment_count
+            direction = [
+                math.cos(tilt) * outward[dimension]
+                + math.sin(tilt)
+                * (
+                    math.cos(angle) * basis_1[dimension]
+                    + math.sin(angle) * basis_2[dimension]
+                )
+                for dimension in range(3)
+            ]
+            boundary.append(
+                [point[dimension] + length * direction[dimension] for dimension in range(3)]
+            )
+        new_ids = []
+        cone_color = [1.0, 0.65, 0.0] if status == "SELECTED" else [1.0, 0.1, 0.1]
+        for index in range(segment_count):
+            for start, end in (
+                (point, boundary[index]),
+                (boundary[index], boundary[(index + 1) % segment_count]),
+            ):
+                old_id = (
+                    self.approach_cone_line_ids[len(new_ids)]
+                    if len(new_ids) < len(self.approach_cone_line_ids)
+                    else -1
+                )
+                new_ids.append(
+                    self._set_debug_line(old_id, start, end, cone_color, 1.5)
+                )
+        self.approach_cone_line_ids = new_ids
+
+        if isinstance(selected_axis, list) and len(selected_axis) == 3:
+            selected_outside = [
+                point[index] - length * float(selected_axis[index])
+                for index in range(3)
+            ]
+            self.approach_selected_axis_line_id = self._set_debug_line(
+                self.approach_selected_axis_line_id,
+                point,
+                selected_outside,
+                [0.2, 0.3, 1.0],
+                5.0,
+            )
+        label = (
+            f"APPROACH CONE {half_angle_deg:.1f} deg"
+            if status == "SELECTED"
+            else "NO REACHABLE APPROACH"
+        )
+        self.approach_cone_label_id = self._set_marker_label(
+            self.approach_cone_label_id,
+            label,
+            boundary[0],
+            cone_color,
+        )
+        self.approach_overlay_signature = signature
+
     def _get_ee_pose_and_tool_tip(self):
         link_state = p.getLinkState(
             self.robot_id,
@@ -1620,6 +1748,7 @@ class IiwaPybulletSim(Node):
                     else list(self.latest_surface_axis)
                 )
                 port_candidates = list(self.latest_port_candidates)
+                approach_selection = self.latest_approach_selection
                 port_candidates_time = self.latest_port_candidates_time
                 port_time = self.latest_port_pose_time
             candidates_fresh = (
@@ -1643,6 +1772,8 @@ class IiwaPybulletSim(Node):
                 )
             else:
                 self._hide_port_detection_overlay()
+            if approach_selection is not None:
+                self._update_approach_cone_overlay(approach_selection)
 
         if not self.show_rcm_debug_markers:
             return

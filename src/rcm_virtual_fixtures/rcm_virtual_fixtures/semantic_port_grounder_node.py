@@ -272,6 +272,8 @@ class SemanticPortGrounder(Node):
         self.lock = threading.Lock()
         self.pending_instruction = ""
         self.pending_request_id = 0
+        self.active_instruction_text = ""
+        self.intent_query_inflight = False
         self.pending_instruction_received_wall_time_sec = 0.0
         self.pending_instruction_received_ros_stamp_sec = 0.0
         self.latest_candidates_payload: dict | None = None
@@ -328,9 +330,13 @@ class SemanticPortGrounder(Node):
         received_wall_time_sec = time.time()
         received_ros_stamp_sec = self.get_clock().now().nanoseconds * 1e-9
         with self.lock:
+            if instruction == self.active_instruction_text:
+                return
             self.pending_request_id += 1
             request_id = self.pending_request_id
             self.pending_instruction = ""
+            self.active_instruction_text = instruction
+            self.intent_query_inflight = True
         self._publish_status(
             f"strict_llm_intent_query_started: request_id={request_id}",
             force=True,
@@ -347,7 +353,12 @@ class SemanticPortGrounder(Node):
         )
         thread.start()
 
-    def _instruction_interpreter_payload(self, instruction: str) -> dict:
+    def _instruction_interpreter_payload(
+        self,
+        instruction: str,
+        *,
+        invalid_sam_prompt: str = "",
+    ) -> dict:
         system_prompt = (
             "You are the strict natural-language control and perception front end "
             "for an RCM port localization demo. Interpret unrestricted multilingual "
@@ -356,9 +367,11 @@ class SemanticPortGrounder(Node):
             "reference_frame, ambiguity. action must be unlock, locate, "
             "or reject. Use unlock only when the user asks only to release/clear the "
             "current lock. If the user asks to unlock and name a new target, use locate. "
-            "For locate, sam_prompt must be a concise English visual noun phrase for "
-            "SAM segmentation of the requested physical aperture(s), without robot "
-            "motion. Preserve spatial meaning such as left down, upper right, relative "
+            "For locate, sam_prompt must contain only a concise English visual class "
+            "noun phrase for all relevant physical apertures, such as circular hole; "
+            "exclude left/right/up/down, ordinals, and other positional modifiers from "
+            "sam_prompt because candidate selection happens after segmentation. Preserve "
+            "spatial meaning such as left down, upper right, relative "
             "objects, ordinals, and camera-view references in target_description. "
             "When the user explicitly says camera view, interpret left/right as image "
             "horizontal position and up/down as image vertical position; ordinary "
@@ -383,11 +396,19 @@ class SemanticPortGrounder(Node):
             ],
             "additionalProperties": False,
         }
+        user_content = instruction
+        if invalid_sam_prompt:
+            user_content = (
+                f"Original instruction: {instruction}\n"
+                f"Your previous sam_prompt {invalid_sam_prompt!r} was invalid because "
+                "the segmentation encoder requires an ASCII English visual class noun "
+                "phrase. Return the corrected complete JSON object."
+            )
         payload = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": instruction},
+                {"role": "user", "content": user_content},
             ],
             "temperature": self.temperature,
             "top_p": self.top_p,
@@ -429,11 +450,60 @@ class SemanticPortGrounder(Node):
             if not isinstance(ambiguity, bool):
                 raise ValueError("model returned non-boolean ambiguity")
             sam_prompt = str(interpretation.get("sam_prompt", "")).strip()
+            if (
+                action == "locate"
+                and sam_prompt
+                and (
+                    not sam_prompt.isascii()
+                    or re.search(r"[A-Za-z]", sam_prompt) is None
+                )
+            ):
+                invalid_prompt = sam_prompt
+                interpretation, corrected_raw = self._request_model(
+                    self._instruction_interpreter_payload(
+                        instruction,
+                        invalid_sam_prompt=invalid_prompt,
+                    )
+                )
+                raw_response = raw_response + "\nCORRECTION:\n" + corrected_raw
+                self.get_logger().info(
+                    "[LLM_INTENT_CORRECTED] "
+                    + json.dumps(
+                        interpretation,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
+                )
+                action = str(interpretation.get("action", "")).strip().lower()
+                ambiguity = interpretation.get("ambiguity")
+                sam_prompt = str(interpretation.get("sam_prompt", "")).strip()
+                if action not in {"unlock", "locate", "reject"}:
+                    raise ValueError(
+                        f"model correction returned invalid action {action!r}"
+                    )
+                if not isinstance(ambiguity, bool):
+                    raise ValueError(
+                        "model correction returned non-boolean ambiguity"
+                    )
+                if (
+                    action == "locate"
+                    and (
+                        not sam_prompt.isascii()
+                        or re.search(r"[A-Za-z]", sam_prompt) is None
+                    )
+                ):
+                    raise ValueError(
+                        "model correction did not produce an ASCII English SAM prompt"
+                    )
             if action == "locate" and (ambiguity or not sam_prompt):
                 raise ValueError(
                     "model did not provide an unambiguous locate target and SAM prompt"
                 )
         except Exception as exc:
+            with self.lock:
+                if self.pending_request_id == request_id:
+                    self.intent_query_inflight = False
+                    self.active_instruction_text = ""
             self.get_logger().error(
                 f"[STRICT_LLM_INTENT_FAILED] request_id={request_id} error={exc}"
             )
@@ -446,6 +516,7 @@ class SemanticPortGrounder(Node):
         with self.lock:
             if self.pending_request_id != request_id:
                 return
+            self.intent_query_inflight = False
 
         control = {
             "schema_version": "vlm_rcm_language_control.v1",
@@ -471,12 +542,16 @@ class SemanticPortGrounder(Node):
                 if self.pending_request_id == request_id:
                     self.pending_instruction = ""
                     self.previous_selection = None
+                    self.active_instruction_text = ""
             self._publish_status(
                 f"strict_llm_unlock_accepted: request_id={request_id}",
                 force=True,
             )
             return
         if action == "reject":
+            with self.lock:
+                if self.pending_request_id == request_id:
+                    self.active_instruction_text = ""
             self._publish_status(
                 f"strict_llm_instruction_rejected: request_id={request_id}",
                 force=True,
@@ -623,9 +698,15 @@ class SemanticPortGrounder(Node):
             "image_rightness(), image_upness(), image_downness(), image_centeredness(), "
             "visibility(), candidate.geometry_confidence, candidate.id, arithmetic and "
             "comparisons. All registered image_* and visibility functions take no "
-            "arguments; never pass image coordinates into them. Combine independent "
-            "spatial requirements by addition. Mark ambiguous rather than guessing when "
-            "the instruction is genuinely unresolved."
+            "arguments; never pass image coordinates into them. Include only semantic "
+            "properties explicitly requested by the instruction: for example, do not "
+            "add image_centeredness() unless the user requested a central target. Combine "
+            "independent requested spatial requirements with equal-scale addition so one "
+            "requested direction cannot erase another. Feasibility is enforced separately "
+            "as a hard deterministic gate. candidate.geometry_confidence and visibility() "
+            "may only be optional tie breakers with total coefficient at most 0.01; they "
+            "must never dominate the requested semantic relation. Mark ambiguous rather "
+            "than guessing when the instruction is genuinely unresolved."
         )
 
     def _should_include_images(self) -> bool:
