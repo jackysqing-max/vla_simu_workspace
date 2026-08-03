@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.4.0 - 2026-08-03
+
+- Added strict Qwen3-guided multi-port localization, semantic candidate
+  selection, geometric verification, and autonomous reachable RCM approach
+  selection within a configurable pose cone.
+- Added the shared English prompt GUI for the Qwen-backed RCM, medical,
+  instrument-grasping, keypoint-debug, and household demos.
+- Added bounded relative-confidence filtering for SAM3 instances so weak prompt
+  matches do not flood the combined mask, with focused unit coverage.
+- Rejected aperture candidates whose search neighborhood intersects the image
+  border or whose annular depth support does not form a sufficiently complete,
+  coherent plane.
+- Simplified the locked-port overlay and made the supported demo launchers open
+  PyBullet GUI explicitly.
+- Fixed PyBullet discovery for ROS background processes when Python user-site
+  packages are disabled by the caller's environment.
+
 ## v0.1.3 - 2026-04-01
 
 - Added `start_semantic_tracking_demo.sh` as the stable semantic-tracking entrypoint for the tabletop RGB-D scene.

@@ -15,6 +15,8 @@ from sensor_msgs.msg import Image
 from std_msgs.msg import Float32, String
 from transformers import Sam3Model, Sam3Processor
 
+from .instance_selection import select_instance_indices
+
 
 def imgmsg_to_rgb(msg: Image) -> np.ndarray:
     """Convert `sensor_msgs/Image` into an RGB uint8 array."""
@@ -57,6 +59,8 @@ class Sam3MaskNode(Node):
         self.declare_parameter("image_topic", "/image_raw")
         self.declare_parameter("prompt", "glasses")
         self.declare_parameter("score_th", 0.3)
+        self.declare_parameter("relative_score_th", 0.20)
+        self.declare_parameter("max_instances", 16)
         self.declare_parameter("mask_th", 0.5)
         self.declare_parameter("max_side", 640)
         self.declare_parameter("infer_hz", 0.5)
@@ -68,6 +72,14 @@ class Sam3MaskNode(Node):
         self.image_topic = self.get_parameter("image_topic").value
         self.prompt = self.get_parameter("prompt").value
         self.score_th = float(self.get_parameter("score_th").value)
+        self.relative_score_th = max(
+            float(self.get_parameter("relative_score_th").value),
+            0.0,
+        )
+        self.max_instances = max(
+            int(self.get_parameter("max_instances").value),
+            1,
+        )
         self.mask_th = float(self.get_parameter("mask_th").value)
         self.max_side = int(self.get_parameter("max_side").value)
         self.infer_hz = float(self.get_parameter("infer_hz").value)
@@ -232,12 +244,17 @@ class Sam3MaskNode(Node):
                 best_score = float(np.max(scores)) if scores.size > 0 else 0.0
 
                 if scores.size > 0:
-                    keep = scores >= self.score_th
-                    if keep.sum() > 0:
-                        kept_count = int(np.count_nonzero(keep))
-                        kept_masks = masks[keep] > 0
+                    kept_indices = select_instance_indices(
+                        scores,
+                        absolute_threshold=self.score_th,
+                        relative_threshold=self.relative_score_th,
+                        max_instances=self.max_instances,
+                    )
+                    if kept_indices.size > 0:
+                        kept_count = int(kept_indices.size)
+                        kept_masks = masks[kept_indices] > 0
                         top_mask = np.any(kept_masks, axis=0).astype(np.uint8) * 255
-                        top_score = float(np.max(scores[keep]))
+                        top_score = float(np.max(scores[kept_indices]))
 
                 if top_mask is None:
                     top_mask = np.zeros(

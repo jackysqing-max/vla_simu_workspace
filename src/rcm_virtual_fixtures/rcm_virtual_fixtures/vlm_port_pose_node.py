@@ -179,7 +179,10 @@ class VlmPortPoseNode(Node):
         self.declare_parameter("min_mask_area_px", 40)
         self.declare_parameter("max_mask_area_fraction", 0.35)
         self.declare_parameter("max_mask_components", 48)
+        self.declare_parameter("candidate_border_margin_px", 40)
         self.declare_parameter("annulus_radius_px", 18)
+        self.declare_parameter("min_annulus_valid_fraction", 0.70)
+        self.declare_parameter("min_annulus_plane_inlier_fraction", 0.65)
         self.declare_parameter("hole_search_radius_px", 40)
         self.declare_parameter("hole_min_depth_m", 0.025)
         self.declare_parameter("hole_min_area_px", 80)
@@ -252,6 +255,7 @@ class VlmPortPoseNode(Node):
         self.declare_parameter("overlay_topic", "/vlm_rcm/overlay")
         self.declare_parameter("candidate_overlay_topic", "/vlm_rcm/candidate_overlay")
         self.declare_parameter("display_overlay", True)
+        self.declare_parameter("show_candidates_when_locked", False)
         self.declare_parameter("display_scale", 1.25)
         self.declare_parameter("target_not_found_timeout_sec", 6.0)
         self.declare_parameter("target_not_found_min_frames", 3)
@@ -289,9 +293,29 @@ class VlmPortPoseNode(Node):
             int(self.get_parameter("max_mask_components").value),
             1,
         )
+        self.candidate_border_margin_px = max(
+            int(self.get_parameter("candidate_border_margin_px").value),
+            0,
+        )
         self.annulus_radius_px = max(
             int(self.get_parameter("annulus_radius_px").value),
             2,
+        )
+        self.min_annulus_valid_fraction = float(
+            np.clip(
+                self.get_parameter("min_annulus_valid_fraction").value,
+                0.0,
+                1.0,
+            )
+        )
+        self.min_annulus_plane_inlier_fraction = float(
+            np.clip(
+                self.get_parameter(
+                    "min_annulus_plane_inlier_fraction"
+                ).value,
+                0.0,
+                1.0,
+            )
         )
         self.hole_search_radius_px = max(
             int(self.get_parameter("hole_search_radius_px").value),
@@ -407,6 +431,9 @@ class VlmPortPoseNode(Node):
         )
         self.display_overlay = bool(
             self.get_parameter("display_overlay").value
+        )
+        self.show_candidates_when_locked = bool(
+            self.get_parameter("show_candidates_when_locked").value
         )
         self.display_scale = max(
             float(self.get_parameter("display_scale").value),
@@ -1469,6 +1496,23 @@ class VlmPortPoseNode(Node):
         depth: np.ndarray,
         info: CameraInfo,
     ):
+        image_height, image_width = mask_shape
+        center_col = float(centroid_uv[0])
+        center_row = float(centroid_uv[1])
+        margin = max(
+            self.candidate_border_margin_px,
+            self.hole_search_radius_px,
+        )
+        if (
+            center_col < margin
+            or center_row < margin
+            or center_col >= image_width - margin
+            or center_row >= image_height - margin
+        ):
+            raise ValueError(
+                "candidate search neighborhood intersects image border"
+            )
+
         kernel_size = 2 * self.annulus_radius_px + 1
         kernel = cv2.getStructuringElement(
             cv2.MORPH_ELLIPSE,
@@ -1477,6 +1521,14 @@ class VlmPortPoseNode(Node):
         dilated = cv2.dilate(component, kernel, iterations=1)
         annulus = (dilated > 0) & (component == 0)
         valid = annulus & np.isfinite(depth) & (depth > 0.03)
+        annulus_count = int(np.count_nonzero(annulus))
+        valid_count = int(np.count_nonzero(valid))
+        valid_fraction = valid_count / max(annulus_count, 1)
+        if valid_fraction < self.min_annulus_valid_fraction:
+            raise ValueError(
+                "incomplete rim depth support: "
+                f"{valid_fraction:.2f}"
+            )
         rows, cols = np.nonzero(valid)
         if rows.size < 24:
             raise ValueError(f"not enough valid rim depth: {rows.size}")
@@ -1516,13 +1568,17 @@ class VlmPortPoseNode(Node):
         )
         if plane is None:
             raise ValueError("rim plane RANSAC failed")
+        plane_inlier_fraction = plane["count"] / max(rows.size, 1)
+        if plane_inlier_fraction < self.min_annulus_plane_inlier_fraction:
+            raise ValueError(
+                "rim spans an occlusion/depth edge: "
+                f"plane_inliers={plane_inlier_fraction:.2f}"
+            )
 
         inward_surface_normal = -normalize(
             plane["normal"],
             fallback=(0.0, 0.0, 1.0),
         )
-        center_col = float(centroid_uv[0])
-        center_row = float(centroid_uv[1])
         grid_rows, grid_cols = np.ogrid[: mask_shape[0], : mask_shape[1]]
         search_roi = (
             (grid_cols - center_col) ** 2
@@ -1653,6 +1709,8 @@ class VlmPortPoseNode(Node):
             "area": area,
             "hole_area": hole_area,
             "plane_count": plane["count"],
+            "annulus_valid_fraction": valid_fraction,
+            "annulus_plane_inlier_fraction": plane_inlier_fraction,
             "plane_rms": plane["rms"],
             "plane_centroid": plane["centroid"],
             "plane_normal": plane["normal"],
@@ -2398,7 +2456,11 @@ class VlmPortPoseNode(Node):
                 point=locked_point,
                 axis=locked_axis,
                 surface_axis=locked_surface_axis,
-                candidates=last_candidates,
+                candidates=(
+                    last_candidates
+                    if self.show_candidates_when_locked
+                    else []
+                ),
                 selected_candidate_id=last_selected_candidate_id,
                 status=(
                     "center: SAM3-guided RGB-D  |  "

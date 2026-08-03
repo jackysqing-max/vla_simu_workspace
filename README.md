@@ -4,7 +4,7 @@ ROS 2 Humble workspace for KUKA iiwa simulation, perception-guided motion,
 LLM task planning, surgical remote-center-of-motion (RCM) constraints, and
 touchless gesture control.
 
-Current release: `v1.3.0`
+Current release: `v1.4.0`
 
 > This is a research simulation. It is not a certified medical control system.
 

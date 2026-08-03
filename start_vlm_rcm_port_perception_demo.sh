@@ -11,6 +11,8 @@ SAM3_PROMPT="${SAM3_PROMPT:-}"
 SAM3_INFER_HZ="${SAM3_INFER_HZ:-1.0}"
 SAM3_MAX_SIDE="${SAM3_MAX_SIDE:-640}"
 SAM3_SCORE_TH="${SAM3_SCORE_TH:-0.05}"
+SAM3_RELATIVE_SCORE_TH="${SAM3_RELATIVE_SCORE_TH:-0.20}"
+SAM3_MAX_INSTANCES="${SAM3_MAX_INSTANCES:-16}"
 SAM3_MASK_TH="${SAM3_MASK_TH:-0.35}"
 SAM3_MIN_FREE_GPU_MIB="${SAM3_MIN_FREE_GPU_MIB:-5500}"
 
@@ -120,6 +122,8 @@ start_bg_sam3() {
       -p infer_hz:=$SAM3_INFER_HZ \
       -p max_side:=$SAM3_MAX_SIDE \
       -p score_th:=$SAM3_SCORE_TH \
+      -p relative_score_th:=$SAM3_RELATIVE_SCORE_TH \
+      -p max_instances:=$SAM3_MAX_INSTANCES \
       -p mask_th:=$SAM3_MASK_TH
   " >"$log_file" 2>&1 &
   echo "$!" >"$pid_file"
@@ -289,6 +293,9 @@ case "${1:-start}" in
        -p calibrated_inward_axis:='[0.335067,0.0,-0.942194]' \
        -p annulus_radius_px:=24 \
        -p hole_search_radius_px:=40 \
+       -p candidate_border_margin_px:=40 \
+       -p min_annulus_valid_fraction:=0.70 \
+       -p min_annulus_plane_inlier_fraction:=0.65 \
        -p hole_min_depth_m:=0.025 \
        -p hole_min_area_px:=80 \
 	       -p min_mask_area_px:=25 \
@@ -300,6 +307,7 @@ case "${1:-start}" in
 	       -p max_center_spread_m:=0.006 \
 	       -p max_axis_spread_deg:=6.0 \
 	       -p display_overlay:=$VLM_RCM_DISPLAY_OVERLAY \
+	       -p show_candidates_when_locked:=false \
 	       -p display_scale:=$VLM_RCM_DISPLAY_SCALE"
 
 	    if [[ "$VLM_RCM_START_SEMANTIC_GROUNDER" == "true" ]]; then
