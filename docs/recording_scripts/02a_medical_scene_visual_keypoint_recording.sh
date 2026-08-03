@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+WS="/home/siqin/ros2_workspaces/humble/ros2_pybullet_ws"
+PROMPT="${*:-left silver surgical instrument}"
+TASK="${VISUAL_TASK:-locate the $PROMPT}"
+
+cd "$WS"
+
+# Medical-scene perception-only recording:
+# - PyBullet medical_grasp scene with silver instruments and tray
+# - SAM3 mask window enlarged
+# - GMS selected keypoint / overlay window enlarged
+# - point cloud window disabled
+# - robot follower disabled, so this records perception only
+export SIM_GUI="${SIM_GUI:-true}"
+export GPU_MONITOR_WINDOW="${GPU_MONITOR_WINDOW:-false}"
+export KEYPOINT_DEBUG_ONLY="${KEYPOINT_DEBUG_ONLY:-true}"
+export KEYPOINT_DEBUG_TIMEOUT_SEC="${KEYPOINT_DEBUG_TIMEOUT_SEC:-180}"
+export KEYPOINT_DEBUG_AUTO_ADVANCE="${KEYPOINT_DEBUG_AUTO_ADVANCE:-false}"
+export START_KEYPOINT_VIEWER="${START_KEYPOINT_VIEWER:-true}"
+export KEYPOINT_VIEWER_DISPLAY_SCALE="${KEYPOINT_VIEWER_DISPLAY_SCALE:-3.2}"
+export KEYPOINT_VIEWER_STATUS_PANEL_WIDTH="${KEYPOINT_VIEWER_STATUS_PANEL_WIDTH:-440}"
+export KEYPOINT_VIEWER_FOLLOW_WINDOW_RESIZE="${KEYPOINT_VIEWER_FOLLOW_WINDOW_RESIZE:-true}"
+export KEYPOINT_VIEWER_PREFER_OVERLAY_IMAGE="${KEYPOINT_VIEWER_PREFER_OVERLAY_IMAGE:-true}"
+export KEYPOINT_VIEWER_SHOW_CLOUD_WINDOW="${KEYPOINT_VIEWER_SHOW_CLOUD_WINDOW:-false}"
+export START_HOVER_FOLLOWER="${START_HOVER_FOLLOWER:-false}"
+export ENABLE_GMS_KEYPOINT_DEMO="${ENABLE_GMS_KEYPOINT_DEMO:-true}"
+export ENABLE_GRIPPER="${ENABLE_GRIPPER:-false}"
+export ENABLE_GRASP_ACTIONS="${ENABLE_GRASP_ACTIONS:-true}"
+export OPEN_VOCAB_TARGETS="${OPEN_VOCAB_TARGETS:-true}"
+export SIM_SCENE_PRESET="${SIM_SCENE_PRESET:-medical_grasp}"
+export SAM3_PROMPT="$PROMPT"
+export SAM3_SCORE_TH="${SAM3_SCORE_TH:-0.05}"
+export FUSION_MIN_SCORE="${FUSION_MIN_SCORE:-0.03}"
+export GMS_KEYPOINT_STABILIZER="${GMS_KEYPOINT_STABILIZER:-true}"
+export GMS_KEYPOINT_FILTER_ALPHA="${GMS_KEYPOINT_FILTER_ALPHA:-0.16}"
+export GMS_KEYPOINT_LOCK_RADIUS_M="${GMS_KEYPOINT_LOCK_RADIUS_M:-0.08}"
+export GMS_KEYPOINT_JUMP_RESET_M="${GMS_KEYPOINT_JUMP_RESET_M:-0.12}"
+export GMS_KEYPOINT_JUMP_HOLD_FRAMES="${GMS_KEYPOINT_JUMP_HOLD_FRAMES:-10}"
+export LLM_BACKEND="${LLM_BACKEND:-qwen3_local}"
+export GPU_EXECUTION_MODE="${GPU_EXECUTION_MODE:-staged_single_gpu}"
+export QWEN3_AUTO_START="${QWEN3_AUTO_START:-true}"
+export QWEN3_STOP_EXTERNAL="${QWEN3_STOP_EXTERNAL:-true}"
+export ALLOW_LOCAL_PLANNER_FALLBACK="${ALLOW_LOCAL_PLANNER_FALLBACK:-false}"
+export PLANNING_TIMEOUT_SEC="${PLANNING_TIMEOUT_SEC:-120}"
+
+exec "$WS/docs/recording_scripts/02_visual_sam3_gms_recording.sh" "$TASK"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-WS="$HOME/ros2_workspaces/humble/ros2_pybullet_ws"
+WS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="$WS/run_logs"
 PID_DIR="$WS/run_pids"
 mkdir -p "$LOG_DIR" "$PID_DIR"
@@ -117,11 +117,11 @@ stop_all() {
   done
 
   # 2) 兜底：按可执行名/节点脚本名杀（解决 ros2 run 派生残留）
-  pkill -INT  -f "iiwa_pybullet_sim_node|iiwa_circle_ik_desired|iiwa_impedance_controller|robotstate_bridge|robot_monitor" 2>/dev/null || true
+  pkill -INT  -f "iiwa_pybullet_sim_node|iiwa_line_ik_desired|iiwa_impedance_controller|robotstate_bridge|robot_monitor" 2>/dev/null || true
   sleep 1
-  pkill -TERM -f "iiwa_pybullet_sim_node|iiwa_circle_ik_desired|iiwa_impedance_controller|robotstate_bridge|robot_monitor" 2>/dev/null || true
+  pkill -TERM -f "iiwa_pybullet_sim_node|iiwa_line_ik_desired|iiwa_impedance_controller|robotstate_bridge|robot_monitor" 2>/dev/null || true
   sleep 1
-  pkill -KILL -f "iiwa_pybullet_sim_node|iiwa_circle_ik_desired|iiwa_impedance_controller|robotstate_bridge|robot_monitor" 2>/dev/null || true
+  pkill -KILL -f "iiwa_pybullet_sim_node|iiwa_line_ik_desired|iiwa_impedance_controller|robotstate_bridge|robot_monitor" 2>/dev/null || true
 
   # 3) 刷新 ros2-daemon，避免 node list 显示旧图
   ros2 daemon stop  >/dev/null 2>&1 || true
@@ -137,7 +137,7 @@ case "${1:-start}" in
     source_env
 
     start_bg       sim      "ros2 run pybullet_ros2_sim iiwa_pybullet_sim_node --ros-args -r __node:=iiwa_pybullet_sim_node"
-    start_retry_bg desired  "ros2 run pybullet_ros2_sim iiwa_circle_ik_desired --ros-args -r __node:=iiwa_circle_ik_desired"
+    start_retry_bg desired  "ros2 run pybullet_ros2_sim iiwa_line_ik_desired --ros-args -r __node:=iiwa_line_ik_desired"
     start_retry_bg imp      "ros2 run pybullet_ros2_sim iiwa_impedance_controller --ros-args -r __node:=iiwa_impedance_controller"
     start_retry_bg bridge   "ros2 run iiwa_state_udp_bridge robotstate_bridge --ros-args -p port:=7755 -p rate_hz:=100.0"
     start_bg       monitor  "ros2 run robot_monitor robot_monitor"
@@ -158,4 +158,3 @@ case "${1:-start}" in
     exit 1
     ;;
 esac
-

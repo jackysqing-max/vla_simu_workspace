@@ -1,0 +1,110 @@
+<?xml version="1.0"?>
+<robot name="franka_hand_gripper">
+  <link name="franka_hand_mount">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.001"/>
+      <inertia ixx="1e-6" ixy="0" ixz="0" iyy="1e-6" iyz="0" izz="1e-6"/>
+    </inertial>
+  </link>
+
+  <joint name="franka_hand_mount_joint" type="fixed">
+    <parent link="franka_hand_mount"/>
+    <child link="panda_hand"/>
+    <origin xyz="0 0 0" rpy="0 0 -0.785398163397"/>
+  </joint>
+
+  <link name="panda_hand">
+    <inertial>
+      <origin xyz="0 0 0.04" rpy="0 0 0"/>
+      <mass value="0.81"/>
+      <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="franka_panda/meshes/visual/hand.obj"/>
+      </geometry>
+      <material name="panda_white">
+        <color rgba="0.93 0.94 0.92 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="franka_panda/meshes/collision/hand.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="panda_leftfinger">
+    <inertial>
+      <origin xyz="0 0.01 0.02" rpy="0 0 0"/>
+      <mass value="0.1"/>
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="franka_panda/meshes/visual/finger.obj"/>
+      </geometry>
+      <material name="panda_finger">
+        <color rgba="0.08 0.09 0.10 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="franka_panda/meshes/collision/finger.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="panda_rightfinger">
+    <inertial>
+      <origin xyz="0 -0.01 0.02" rpy="0 0 0"/>
+      <mass value="0.1"/>
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 3.14159265359"/>
+      <geometry>
+        <mesh filename="franka_panda/meshes/visual/finger.obj"/>
+      </geometry>
+      <material name="panda_finger"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 3.14159265359"/>
+      <geometry>
+        <mesh filename="franka_panda/meshes/collision/finger.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="panda_finger_joint1" type="prismatic">
+    <parent link="panda_hand"/>
+    <child link="panda_leftfinger"/>
+    <origin xyz="0 0 0.0584" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit effort="20" lower="0.0" upper="0.04" velocity="0.2"/>
+  </joint>
+
+  <joint name="panda_finger_joint2" type="prismatic">
+    <parent link="panda_hand"/>
+    <child link="panda_rightfinger"/>
+    <origin xyz="0 0 0.0584" rpy="0 0 0"/>
+    <axis xyz="0 -1 0"/>
+    <limit effort="20" lower="0.0" upper="0.04" velocity="0.2"/>
+    <mimic joint="panda_finger_joint1"/>
+  </joint>
+
+  <link name="panda_grasptarget">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.001"/>
+      <inertia ixx="1e-6" ixy="0" ixz="0" iyy="1e-6" iyz="0" izz="1e-6"/>
+    </inertial>
+  </link>
+
+  <joint name="panda_grasptarget_hand" type="fixed">
+    <parent link="panda_hand"/>
+    <child link="panda_grasptarget"/>
+    <origin xyz="0 0 0.105" rpy="0 0 0"/>
+  </joint>
+</robot>

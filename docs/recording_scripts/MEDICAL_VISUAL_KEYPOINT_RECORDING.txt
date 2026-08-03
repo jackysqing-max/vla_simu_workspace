@@ -1,0 +1,79 @@
+医疗场景视觉分割与关键点获取录制流程
+====================================
+
+工作目录：
+
+  cd /home/siqin/ros2_workspaces/humble/ros2_pybullet_ws/docs
+
+
+录制目标
+--------
+
+展示当前医疗器械场景中的视觉链路：
+
+  1. prompt = left silver surgical instrument
+  2. SAM3 输出 mask
+  3. GMS / keypoint 模块在 mask 内选择候选点
+  4. 输出 selected keypoint 以及 overlay
+
+这一段不展示机械臂动作，不启动 hover following。
+
+
+推荐 OBS 画面
+------------
+
+  - SAM3 Mask 窗口
+  - SAM3 Keypoint / overlay 窗口
+  - 可选：PyBullet GUI，显示银色器械和托盘场景
+
+点云窗口默认关闭。
+
+
+启动命令
+--------
+
+  ./recording_scripts/00_stop_recording_stack.sh
+
+  ./recording_scripts/02a_medical_scene_visual_keypoint_recording.sh \
+    "left silver surgical instrument"
+
+录到 mask 和 keypoint overlay 稳定后停止：
+
+  ./recording_scripts/00_stop_recording_stack.sh
+
+
+可选 topic 终端
+--------------
+
+SAM3 当前 prompt：
+
+  cd /home/siqin/ros2_workspaces/humble/ros2_pybullet_ws
+  source /opt/ros/humble/setup.bash
+  source install/setup.bash
+  ros2 topic echo /sam3/active_prompt
+
+GMS 选择的 3D keypoint：
+
+  cd /home/siqin/ros2_workspaces/humble/ros2_pybullet_ws
+  source /opt/ros/humble/setup.bash
+  source install/setup.bash
+  ros2 topic echo /gms_keypoints/selected_keypoint_3d
+
+GMS valid 状态：
+
+  cd /home/siqin/ros2_workspaces/humble/ros2_pybullet_ws
+  source /opt/ros/humble/setup.bash
+  source install/setup.bash
+  ros2 topic echo /gms_keypoints/valid
+
+
+导演脚本入口
+------------
+
+只录视觉段：
+
+  ./recording_scripts/recording_director.sh vision
+
+录 PPT 推荐核心顺序：
+
+  ./recording_scripts/recording_director.sh core

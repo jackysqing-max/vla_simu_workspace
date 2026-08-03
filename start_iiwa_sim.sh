@@ -1,13 +1,13 @@
 #!/bin/bash
 set -euo pipefail
 
-WS="${HOME}/ros2_pybullet_ws"
+WS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --------- ROS pkgs / execs ----------
 SIM_PKG="pybullet_ros2_sim"
 SIM_EXEC="iiwa_pybullet_sim_node"
 DES_PKG="pybullet_ros2_sim"
-DES_EXEC="iiwa_circle_ik_desired"
+DES_EXEC="iiwa_line_ik_desired"
 CTRL_PKG="pybullet_ros2_sim"
 CTRL_EXEC="iiwa_impedance_controller"
 
@@ -15,7 +15,7 @@ BRIDGE_PKG="iiwa_state_udp_bridge"
 BRIDGE_EXEC="robotstate_bridge"   # 如果你的 bridge 可执行名不同，下面会自动探测
 
 MON_PKG="robot_monitor"
-MON_EXEC="robot_monitor_gui"
+MON_EXEC="robot_monitor"
 
 # --------- Default params ----------
 K_DEFAULT="${K_DEFAULT:-800.0}"

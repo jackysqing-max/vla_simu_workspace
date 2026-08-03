@@ -7,6 +7,7 @@ endif()
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
+find_package(geometry_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
@@ -32,7 +33,7 @@ add_executable(robot_monitor
                   src/mainwindow.ui)
 
 
-ament_target_dependencies(robot_monitor rclcpp std_msgs robot_control_msgs std_srvs)
+ament_target_dependencies(robot_monitor geometry_msgs rclcpp std_msgs robot_control_msgs std_srvs)
 
 target_link_libraries(robot_monitor Qt6::Core Qt6::Widgets Qt6::Charts)
 

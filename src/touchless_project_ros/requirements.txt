@@ -1,0 +1,10 @@
+# Runtime dependencies for the ROS 2 touchless_project wrapper.
+#
+# Keep NumPy below 2.0 on ROS Humble/Ubuntu 22.04 because distro matplotlib and
+# several compiled Python extensions are built against NumPy 1.x.
+numpy<2
+opencv-contrib-python==4.11.0.86
+mediapipe==0.10.21
+nibabel
+pyvista
+pyvistaqt

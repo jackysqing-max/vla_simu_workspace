@@ -3,24 +3,16 @@
 <package format="3">
   <name>robot_monitor</name>
   <version>0.0.0</version>
-  <description>robot state monitor</description>
+  <description>Qt monitor for robot_control_msgs/RobotState streams</description>
   <maintainer email="siqin@todo.todo">siqin</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>geometry_msgs</depend>
   <depend>rclcpp</depend>
   <depend>std_msgs</depend>
   <depend>std_srvs</depend>
   <depend>robot_control_msgs</depend>
-
-  <exec_depend>ros2launch</exec_depend>
-  <exec_depend>joint_state_publisher_gui</exec_depend>
-  <exec_depend>robot_state_publisher</exec_depend>
-  <exec_depend>franka_description</exec_depend>
-  <exec_depend>rviz2</exec_depend>
-  <exec_depend>urdf</exec_depend>
-  <exec_depend>xacro</exec_depend>
-
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

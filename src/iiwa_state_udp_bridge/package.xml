@@ -3,11 +3,12 @@
 <package format="3">
   <name>iiwa_state_udp_bridge</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
+  <description>Bridge iiwa control topics into robot_control_msgs/RobotState</description>
   <maintainer email="siqin@todo.todo">siqin</maintainer>
-  <license>TODO: License declaration</license>
+  <license>Apache-2.0</license>
 
   <depend>rclpy</depend>
+  <depend>robot_control_msgs</depend>
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
 

@@ -14,9 +14,9 @@ setup(
     install_requires=['setuptools'],
     zip_safe=True,
     maintainer='siqin',
-    maintainer_email='siqin@todo.todo',
-    description='TODO: Package description',
-    license='TODO: License declaration',
+    maintainer_email='jackysqing@gmail.com',
+    description='Prompt-driven SAM3 segmentation for ROS 2 image topics',
+    license='Apache-2.0',
     extras_require={
         'test': [
             'pytest',
@@ -24,9 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'sam3_node = sam3_ros.sam3_node:main',
             'sam3_mask_node = sam3_ros.sam3_mask_node:main',
-            'sam3_overlay_node = sam3_ros.sam3_overlay_node:main',
         ],
     },
 )
