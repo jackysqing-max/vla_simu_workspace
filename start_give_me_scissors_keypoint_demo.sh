@@ -3,6 +3,10 @@ set -euo pipefail
 
 WS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+if [[ "${1:-}" =~ ^(task|gui|prompt-gui)$ && "$#" -eq 1 ]]; then
+  exec "$WS/start_prompt_gui.sh" --demo scissors_keypoint
+fi
+
 export KEYPOINT_DEBUG_ONLY="${KEYPOINT_DEBUG_ONLY:-true}"
 export START_KEYPOINT_VIEWER="${START_KEYPOINT_VIEWER:-true}"
 export ENABLE_GMS_KEYPOINT_DEMO="${ENABLE_GMS_KEYPOINT_DEMO:-true}"
@@ -40,6 +44,7 @@ export FOLLOWER_REQUIRE_OBJECT_PLANE_FRAME="${FOLLOWER_REQUIRE_OBJECT_PLANE_FRAM
 export OBJECT_PLANE_TIMEOUT_SEC="${OBJECT_PLANE_TIMEOUT_SEC:-4.0}"
 
 export PYBULLET_SHOW_KEYPOINT_OVERLAY="${PYBULLET_SHOW_KEYPOINT_OVERLAY:-true}"
+export SIM_GUI="true"
 export PYBULLET_KEYPOINT_OVERLAY_TOPIC="${PYBULLET_KEYPOINT_OVERLAY_TOPIC:-/gms_keypoints/selected_keypoint_3d}"
 export PYBULLET_KEYPOINT_OVERLAY_VALID_TOPIC="${PYBULLET_KEYPOINT_OVERLAY_VALID_TOPIC:-/gms_keypoints/valid}"
 export PYBULLET_KEYPOINT_OVERLAY_PLANE_NORMAL_TOPIC="${PYBULLET_KEYPOINT_OVERLAY_PLANE_NORMAL_TOPIC:-/gms_keypoints/object_plane_normal}"

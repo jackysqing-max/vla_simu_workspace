@@ -282,6 +282,9 @@ show_status() {
 }
 
 case "${1:-start}" in
+  gui|prompt-gui)
+    exec "$WS/start_prompt_gui.sh" --demo rcm
+    ;;
   start)
     source_env
     if [[ "$LLM_BACKEND" != "qwen3_local" ]]; then
@@ -327,6 +330,9 @@ case "${1:-start}" in
     ;;
   task)
     shift || true
+    if [[ $# -eq 0 ]]; then
+      exec "$WS/start_prompt_gui.sh" --demo rcm
+    fi
     source_env
     if [[ -f "$MODE_FILE" ]]; then
       mapfile -t saved_mode <"$MODE_FILE"
@@ -412,7 +418,7 @@ case "${1:-start}" in
       "$LOG_DIR/vlm_rcm_port_sam3.log"
     ;;
   *)
-    echo "Usage: $0 {start|task [instruction]|locate \"text\"|stop|status|logs}"
+    echo "Usage: $0 {start|gui|task [instruction]|locate \"text\"|stop|status|logs}"
     exit 2
     ;;
 esac

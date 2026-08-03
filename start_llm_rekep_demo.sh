@@ -4,6 +4,7 @@ set -euo pipefail
 WS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROS_SETUP="/opt/ros/humble/setup.bash"
 WS_SETUP="$WS/install/setup.bash"
+PYBULLET_SITE_PACKAGES="${PYBULLET_SITE_PACKAGES:-$(/usr/bin/python3 -m site --user-site)}"
 
 SAM3_VENV="${SAM3_VENV:-$HOME/venvs/ros_vla}"
 SAM3_PROMPT="${SAM3_PROMPT:-red cube}"
@@ -314,6 +315,7 @@ start_bg_ros() {
     set +u
     source \"$ROS_SETUP\"
     source \"$WS_SETUP\"
+    export PYTHONPATH=\"$PYBULLET_SITE_PACKAGES:\${PYTHONPATH:-}\"
     set -u 2>/dev/null || true
     echo \$\$ > \"$pidf\"
     exec $cmd
@@ -1120,11 +1122,14 @@ case "${1:-start}" in
     run_task_shell
     ;;
 
+  gui|prompt-gui)
+    exec "$WS/start_prompt_gui.sh" --demo "${PROMPT_GUI_DEMO_KEY:-medical}"
+    ;;
+
   task)
     shift || true
     if [[ $# -eq 0 ]]; then
-      err "Usage: $0 task \"your instruction\""
-      exit 1
+      exec "$WS/start_prompt_gui.sh" --demo "${PROMPT_GUI_DEMO_KEY:-medical}"
     fi
     ensure_task_stack_ready || exit 1
     if is_staged_single_gpu_mode; then
@@ -1193,7 +1198,7 @@ case "${1:-start}" in
     ;;
 
   *)
-    echo "Usage: $0 {start|stop|status|logs|gpu-monitor|gpu-snapshot|shell|interactive|task|clean|stop-qwen3-external}"
+    echo "Usage: $0 {start|stop|status|logs|gpu-monitor|gpu-snapshot|gui|shell|interactive|task [instruction]|clean|stop-qwen3-external}"
     echo "LLM backend env:"
     echo "  LLM_BACKEND=openai"
     echo "  LLM_BACKEND=qwen3_local"

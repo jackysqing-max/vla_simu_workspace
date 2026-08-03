@@ -3,11 +3,16 @@ set -euo pipefail
 
 WS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+if [[ "${1:-}" =~ ^(task|gui|prompt-gui)$ && "$#" -eq 1 ]]; then
+  exec "$WS/start_prompt_gui.sh" --demo household
+fi
+
 export OPEN_VOCAB_TARGETS="${OPEN_VOCAB_TARGETS:-true}"
 export SIM_SCENE_PRESET="${SIM_SCENE_PRESET:-household}"
 export SAM3_PROMPT="${SAM3_PROMPT:-mug}"
 export LLM_BACKEND="${LLM_BACKEND:-qwen3_local}"
 export QWEN3_STOP_EXTERNAL="${QWEN3_STOP_EXTERNAL:-true}"
+export SIM_GUI="true"
 
 if [ "$#" -eq 0 ]; then
   exec "$WS/start_llm_rekep_demo.sh" start
