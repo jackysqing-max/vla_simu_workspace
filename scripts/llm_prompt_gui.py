@@ -18,6 +18,9 @@ from tkinter import messagebox, ttk
 
 
 WORKSPACE = Path(__file__).resolve().parents[1]
+HISURG_RAS_WS = Path(
+    os.environ.get("HISURG_RAS_WS", str(WORKSPACE.parent / "hisurg_ras_ws"))
+).expanduser().resolve()
 
 # ---------------------------------------------------------------------------
 # Font settings: edit these values to customize the entire interface.
@@ -46,6 +49,13 @@ DEMOS = (
         "start_llm_vlm_rcm_demo.sh",
         "Locate a target port on the multi-port phantom, select a reachable insertion pose, and establish RCM.",
         "Locate the upper-left port in the camera view, automatically select the nearest reachable insertion pose within a 20-degree cone, and establish RCM",
+    ),
+    Demo(
+        "qwen3_vl_direct",
+        "Multi-port Qwen3-VL Direct Target",
+        str(HISURG_RAS_WS / "scripts/start_qwen3_vl_direct_target_demo.sh"),
+        "Send the camera image and instruction directly to local Qwen3-VL, then publish the selected target point to the robot tracker.",
+        "Locate the center port in the camera image.",
     ),
     Demo(
         "medical",
