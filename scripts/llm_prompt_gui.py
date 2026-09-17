@@ -44,6 +44,20 @@ class Demo:
 
 DEMOS = (
     Demo(
+        "torso_candidates",
+        "Torso v5 / SAM3 Candidates + Qwen Entry Localization",
+        str(HISURG_RAS_WS / "scripts/start_torso_candidates_demo.sh"),
+        "Detect candidate openings with SAM3, select with Qwen, and visualize the entry point and surface-normal axis. Arm frozen; ROS domain 44.",
+        "Locate the lowest visible port in the camera view.",
+    ),
+    Demo(
+        "torso_7holes",
+        "Torso Seven-port / Qwen3-VL (Frozen Arm)",
+        str(HISURG_RAS_WS / "scripts/start_torso_7holes_demo.sh"),
+        "Localize an opening on the torso phantom from the camera image and instruction. Arm motion is disabled; ROS domain 43.",
+        "Locate the leftmost visible opening in the camera image.",
+    ),
+    Demo(
         "rcm",
         "Multi-port Localization / RCM",
         "start_llm_vlm_rcm_demo.sh",

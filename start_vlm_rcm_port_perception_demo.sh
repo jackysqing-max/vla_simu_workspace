@@ -2,8 +2,8 @@
 set -euo pipefail
 
 WS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_DIR="$WS/run_logs"
-PID_DIR="$WS/run_pids"
+LOG_DIR="${VLM_RCM_LOG_DIR:-$WS/run_logs}"
+PID_DIR="${VLM_RCM_PID_DIR:-$WS/run_pids}"
 
 SAM3_VENV="${SAM3_VENV:-$HOME/venvs/ros_vla}"
 SAM3_DEVICE="${SAM3_DEVICE:-cuda}"
@@ -158,12 +158,26 @@ stop_all() {
     [[ -f "$pid_file" ]] || continue
     local pid
     pid="$(cat "$pid_file" 2>/dev/null || true)"
-    if pid_alive "$pid"; then
-      kill -INT -- "-$pid" 2>/dev/null || kill -INT "$pid" 2>/dev/null || true
-      sleep 0.5
-    fi
-    if pid_alive "$pid"; then
-      kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]] || { rm -f "$pid_file"; continue; }
+    # setsid gives each service its own process group. Model workers can outlive
+    # their launcher and ignore graceful signals while CUDA is active. Do not
+    # forget their PID before the whole group has actually exited.
+    local signal attempt
+    for signal in INT TERM KILL; do
+      if ! kill -0 -- "-$pid" 2>/dev/null && ! pid_alive "$pid"; then
+        break
+      fi
+      kill -"$signal" -- "-$pid" 2>/dev/null || kill -"$signal" "$pid" 2>/dev/null || true
+      for ((attempt = 0; attempt < 20; attempt++)); do
+        if ! kill -0 -- "-$pid" 2>/dev/null && ! pid_alive "$pid"; then
+          break
+        fi
+        sleep 0.25
+      done
+    done
+    if kill -0 -- "-$pid" 2>/dev/null || pid_alive "$pid"; then
+      echo "[ERROR] service group $pid did not exit; retaining $pid_file" >&2
+      return 1
     fi
     rm -f "$pid_file"
   done
@@ -186,7 +200,7 @@ show_status() {
 case "${1:-start}" in
   start)
     source_env
-    stop_all >/dev/null 2>&1 || true
+    stop_all
     startup_complete=false
     cleanup_failed_start() {
       if [[ "$startup_complete" != "true" ]]; then
@@ -216,8 +230,8 @@ case "${1:-start}" in
       "env __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia \
        ros2 run pybullet_ros2_sim iiwa_pybullet_sim_node --ros-args \
        -p gui:=$VLM_RCM_GUI \
-       -p use_goto:=true \
-       -p init_q:='[0.0,0.462931412,0.0,-1.132967496,0.0,1.204016934,0.0]' \
+       -p use_goto:=${VLM_RCM_USE_GOTO:-true} \
+       -p init_q:='${VLM_RCM_INIT_Q:-[0.0,0.462931412,0.0,-1.132967496,0.0,1.204016934,0.0]}' \
        -p initial_control_mode:=1 \
        -p reset_to_init_on_start:=true \
        -p goto_duration:=0.5 \
@@ -234,9 +248,10 @@ case "${1:-start}" in
        -p table_y_m:=0.0 \
        -p table_top_z_m:=0.240701 \
        -p clean_gui:=true \
-       -p camera_distance_m:=0.82 \
-       -p camera_yaw_deg:=42.0 \
-       -p camera_pitch_deg:=-38.0 \
+       -p camera_distance_m:=${VLM_RCM_GUI_DISTANCE:-0.82} \
+       -p camera_yaw_deg:=${VLM_RCM_GUI_YAW:-42.0} \
+       -p camera_pitch_deg:=${VLM_RCM_GUI_PITCH:--38.0} \
+       -p camera_target:='${VLM_RCM_GUI_TARGET:-[0.55,0.0,0.30]}' \
        -p show_rcm_debug_markers:=true \
        -p show_port_detection_overlay:=true \
        -p locked_port_point_topic:=/vlm_rcm/locked_port_point \
@@ -255,9 +270,9 @@ case "${1:-start}" in
        -p rcm_phantom_mesh_path:='$PHANTOM_MESH' \
        -p rcm_phantom_collision:=false \
        -p rcm_phantom_alpha:=1.0 \
-       -p rcm_phantom_x_m:=0.701726 \
-       -p rcm_phantom_y_m:=0.0 \
-       -p rcm_phantom_z_m:=0.240701 \
+       -p rcm_phantom_x_m:=${VLM_RCM_PHANTOM_X:-0.701726} \
+       -p rcm_phantom_y_m:=${VLM_RCM_PHANTOM_Y:-0.0} \
+       -p rcm_phantom_z_m:=${VLM_RCM_PHANTOM_Z:-0.240701} \
        -p rcm_phantom_roll_deg:=0.0 \
        -p rcm_phantom_pitch_deg:=0.0 \
        -p rcm_phantom_yaw_deg:=0.0 \
@@ -288,16 +303,16 @@ case "${1:-start}" in
        -p expected_port_world:='[$VLM_RCM_EXPECTED_X_M,$VLM_RCM_EXPECTED_Y_M,$VLM_RCM_EXPECTED_Z_M]' \
        -p expected_port_max_distance_m:=0.0 \
        -p normal_reference:='[0.0,0.0,1.0]' \
-       -p plane_max_tilt_deg:=20.0 \
+       -p plane_max_tilt_deg:=${VLM_RCM_PLANE_MAX_TILT:-20.0} \
        -p axis_mode:=$VLM_RCM_AXIS_MODE \
        -p calibrated_inward_axis:='[0.335067,0.0,-0.942194]' \
-       -p annulus_radius_px:=24 \
-       -p hole_search_radius_px:=40 \
+       -p annulus_radius_px:=${VLM_RCM_ANNULUS_RADIUS:-24} \
+       -p hole_search_radius_px:=${VLM_RCM_HOLE_SEARCH_RADIUS:-40} \
        -p candidate_border_margin_px:=40 \
        -p min_annulus_valid_fraction:=0.70 \
-       -p min_annulus_plane_inlier_fraction:=0.65 \
-       -p hole_min_depth_m:=0.025 \
-       -p hole_min_area_px:=80 \
+       -p min_annulus_plane_inlier_fraction:=${VLM_RCM_PLANE_INLIER_FRACTION:-0.65} \
+       -p hole_min_depth_m:=${VLM_RCM_HOLE_MIN_DEPTH:-0.025} \
+       -p hole_min_area_px:=${VLM_RCM_HOLE_MIN_AREA:-80} \
 	       -p min_mask_area_px:=25 \
 	       -p min_score:=0.03 \
 	       -p language_control_topic:=/vlm_rcm/language_control \
@@ -307,7 +322,7 @@ case "${1:-start}" in
 	       -p max_center_spread_m:=0.006 \
 	       -p max_axis_spread_deg:=6.0 \
 	       -p display_overlay:=$VLM_RCM_DISPLAY_OVERLAY \
-	       -p show_candidates_when_locked:=false \
+	       -p show_candidates_when_locked:=${VLM_RCM_SHOW_LOCKED_CANDIDATES:-false} \
 	       -p display_scale:=$VLM_RCM_DISPLAY_SCALE"
 
 	    if [[ "$VLM_RCM_START_SEMANTIC_GROUNDER" == "true" ]]; then
