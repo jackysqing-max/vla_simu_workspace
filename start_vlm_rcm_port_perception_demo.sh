@@ -252,8 +252,8 @@ case "${1:-start}" in
        -p camera_yaw_deg:=${VLM_RCM_GUI_YAW:-42.0} \
        -p camera_pitch_deg:=${VLM_RCM_GUI_PITCH:--38.0} \
        -p camera_target:='${VLM_RCM_GUI_TARGET:-[0.55,0.0,0.30]}' \
-       -p show_rcm_debug_markers:=true \
-       -p show_port_detection_overlay:=true \
+       -p show_rcm_debug_markers:=${VLM_RCM_DEBUG_MARKERS:-true} \
+       -p show_port_detection_overlay:=${VLM_RCM_PORT_OVERLAY:-true} \
        -p locked_port_point_topic:=/vlm_rcm/locked_port_point \
        -p locked_port_axis_topic:=/vlm_rcm/locked_port_axis \
        -p locked_surface_axis_topic:=/vlm_rcm/locked_surface_axis \
@@ -299,7 +299,7 @@ case "${1:-start}" in
     fi
 
     start_bg_ros vlm_rcm_port_pose \
-       "ros2 run rcm_virtual_fixtures vlm_port_pose_node --ros-args \
+       "${VLM_RCM_POSE_EXECUTABLE:-ros2 run rcm_virtual_fixtures vlm_port_pose_node} --ros-args \
        -p expected_port_world:='[$VLM_RCM_EXPECTED_X_M,$VLM_RCM_EXPECTED_Y_M,$VLM_RCM_EXPECTED_Z_M]' \
        -p expected_port_max_distance_m:=0.0 \
        -p normal_reference:='[0.0,0.0,1.0]' \
@@ -327,7 +327,7 @@ case "${1:-start}" in
 
 	    if [[ "$VLM_RCM_START_SEMANTIC_GROUNDER" == "true" ]]; then
 	      start_bg_ros vlm_rcm_port_semantic \
-	        "ros2 run rcm_virtual_fixtures semantic_port_grounder_node --ros-args \
+	        "${VLM_RCM_SEMANTIC_EXECUTABLE:-ros2 run rcm_virtual_fixtures semantic_port_grounder_node} --ros-args \
 	         -p api_base_url:='$QWEN_VL_API_BASE_URL' \
 	         -p api_key:='$QWEN_VL_API_KEY' \
 	         -p api_key_required:=false \
