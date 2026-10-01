@@ -1,0 +1,8 @@
+{
+  "benchmark_version": "v2",
+  "status": "development",
+  "baseline_tag": "benchmark-v1-20261001",
+  "baseline_commit": "ffa05fec0dd526f86bee5b16eb05ebcaddf880f1",
+  "primary_repository": "https://github.com/jackysqing-max/hisurg_ras_ws/tree/benchmark/v2",
+  "runtime_changes_in_this_initialization": false
+}

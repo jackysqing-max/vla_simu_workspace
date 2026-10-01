@@ -1,4 +1,4 @@
-> **Benchmark版本：** `main`为v1历史依赖基线，当前工作请使用[benchmark/v2](https://github.com/jackysqing-max/vla_simu_workspace/tree/benchmark/v2)。[版本说明](docs/benchmark_versions_20261001.md)。
+> **Benchmark版本：** **当前分支为benchmark v2工作区**；`main`及冻结标签保留v1。配套研究使用[benchmark/v2](https://github.com/jackysqing-max/vla_simu_workspace/tree/benchmark/v2)。[版本说明](docs/benchmark_versions_20261001.md)。
 
 # ROS 2 PyBullet IIWA Workspace
 
