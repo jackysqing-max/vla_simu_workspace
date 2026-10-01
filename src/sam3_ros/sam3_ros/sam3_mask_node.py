@@ -16,6 +16,7 @@ from std_msgs.msg import Float32, String
 from transformers import Sam3Model, Sam3Processor
 
 from .instance_selection import select_instance_indices
+from .round_evidence import active_round, same_round, save_inference, mark_busy
 
 
 def imgmsg_to_rgb(msg: Image) -> np.ndarray:
@@ -129,6 +130,7 @@ class Sam3MaskNode(Node):
         torch.backends.cudnn.allow_tf32 = True
         torch.backends.cudnn.benchmark = True
 
+        self.prompt_round_id = None
         self.worker = threading.Thread(target=self.infer_loop, daemon=True)
         self.worker.start()
         if self.prompt_republish_sec > 0.0:
@@ -146,6 +148,9 @@ class Sam3MaskNode(Node):
 
     def on_prompt(self, msg: String):
         new_prompt = msg.data.strip()
+        audit_round = active_round()
+        if audit_round and new_prompt:
+            self.prompt_round_id = audit_round['round_id']
         if not new_prompt or new_prompt == self.prompt:
             return
         self.prompt = new_prompt
@@ -201,6 +206,15 @@ class Sam3MaskNode(Node):
             last_run = time.time()
 
             try:
+                audit_round = active_round()
+                if audit_round is False:
+                    continue
+                stamp_ns = header.stamp.sec * 1000000000 + header.stamp.nanosec
+                if audit_round and (stamp_ns < audit_round['earliest_stamp_ns'] or
+                                    self.prompt_round_id != audit_round['round_id']):
+                    continue
+                mark_busy(audit_round)
+                inference_started = time.time()
                 inference_prompt = str(self.prompt)
                 rgb_small, (orig_h, orig_w) = resize_keep_aspect(rgb, self.max_side)
                 pil_image = PILImage.fromarray(rgb_small)
@@ -228,7 +242,7 @@ class Sam3MaskNode(Node):
 
                 # A prompt can change while GPU inference is in flight.  Never
                 # publish an old-prompt mask into the new language request.
-                if inference_prompt != self.prompt:
+                if inference_prompt != self.prompt or not same_round(audit_round):
                     self.get_logger().info(
                         "Discarded stale inference result: "
                         f"prompt={inference_prompt!r} active={self.prompt!r}"
@@ -238,6 +252,7 @@ class Sam3MaskNode(Node):
                 masks = result["masks"].detach().cpu().numpy()
                 scores = result["scores"].detach().cpu().numpy()
 
+                kept_indices = np.empty(0, dtype=np.int64)
                 top_mask = None
                 top_score = 0.0
                 kept_count = 0
@@ -280,6 +295,9 @@ class Sam3MaskNode(Node):
                         )
                     )
 
+                save_inference(audit_round, header, rgb, rgb_small, masks, scores,
+                               kept_indices, top_mask, inference_prompt,
+                               inference_started, time.time(), self)
                 score_msg = Float32()
                 # Publish the actual best score even when it is below the mask
                 # threshold.  Consumers can then explain why no mask was emitted.
@@ -290,6 +308,8 @@ class Sam3MaskNode(Node):
             except Exception as exc:
                 self.get_logger().error(f"Infer error: {exc!r}")
                 time.sleep(0.2)
+            finally:
+                mark_busy(None)
 
 
 def main(args=None):

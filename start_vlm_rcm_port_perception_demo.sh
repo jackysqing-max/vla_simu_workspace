@@ -156,6 +156,12 @@ stop_all() {
   local pid_file
   for pid_file in "$PID_DIR"/vlm_rcm_port_*.pid; do
     [[ -f "$pid_file" ]] || continue
+    if [[ "${VLM_RCM_STOP_ROUND_ONLY:-false}" == "true" ]]; then
+      case "$pid_file" in
+        */vlm_rcm_port_pose.pid|*/vlm_rcm_port_semantic.pid) ;;
+        *) continue ;;
+      esac
+    fi
     local pid
     pid="$(cat "$pid_file" 2>/dev/null || true)"
     [[ "$pid" =~ ^[1-9][0-9]*$ ]] || { rm -f "$pid_file"; continue; }
@@ -195,6 +201,59 @@ show_status() {
       echo "[--] $name not running"
     fi
   done
+}
+
+start_perception() {
+    start_bg_ros vlm_rcm_port_pose \
+       "${VLM_RCM_POSE_EXECUTABLE:-ros2 run rcm_virtual_fixtures vlm_port_pose_node} --ros-args \
+       -p expected_port_world:='[$VLM_RCM_EXPECTED_X_M,$VLM_RCM_EXPECTED_Y_M,$VLM_RCM_EXPECTED_Z_M]' \
+       -p expected_port_max_distance_m:=0.0 \
+       -p normal_reference:='[0.0,0.0,1.0]' \
+       -p plane_max_tilt_deg:=${VLM_RCM_PLANE_MAX_TILT:-20.0} \
+       -p axis_mode:=$VLM_RCM_AXIS_MODE \
+       -p calibrated_inward_axis:='[0.335067,0.0,-0.942194]' \
+       -p annulus_radius_px:=${VLM_RCM_ANNULUS_RADIUS:-24} \
+       -p hole_search_radius_px:=${VLM_RCM_HOLE_SEARCH_RADIUS:-40} \
+       -p candidate_border_margin_px:=40 \
+       -p min_annulus_valid_fraction:=0.70 \
+       -p min_annulus_plane_inlier_fraction:=${VLM_RCM_PLANE_INLIER_FRACTION:-0.65} \
+       -p hole_min_depth_m:=${VLM_RCM_HOLE_MIN_DEPTH:-0.025} \
+       -p hole_min_area_px:=${VLM_RCM_HOLE_MIN_AREA:-80} \
+	       -p min_mask_area_px:=25 \
+	       -p min_score:=0.03 \
+	       -p language_control_topic:=/vlm_rcm/language_control \
+	       -p require_language_instruction:=true \
+	       -p stable_frames:=3 \
+	       -p stability_window:=5 \
+	       -p max_center_spread_m:=0.006 \
+	       -p max_axis_spread_deg:=6.0 \
+	       -p display_overlay:=$VLM_RCM_DISPLAY_OVERLAY \
+	       -p show_candidates_when_locked:=${VLM_RCM_SHOW_LOCKED_CANDIDATES:-false} \
+	       -p display_scale:=$VLM_RCM_DISPLAY_SCALE"
+
+	    if [[ "$VLM_RCM_START_SEMANTIC_GROUNDER" == "true" ]]; then
+	      start_bg_ros vlm_rcm_port_semantic \
+	        "${VLM_RCM_SEMANTIC_EXECUTABLE:-ros2 run rcm_virtual_fixtures semantic_port_grounder_node} --ros-args \
+	         -p api_base_url:='$QWEN_VL_API_BASE_URL' \
+	         -p api_key:='$QWEN_VL_API_KEY' \
+	         -p api_key_required:=false \
+	         -p model:='$QWEN_VL_MODEL' \
+	         -p temperature:=0.0 \
+	         -p top_p:=1.0 \
+	         -p max_output_tokens:=256 \
+	         -p request_timeout_sec:=90.0 \
+	         -p input_mode:='$QWEN_VL_INPUT_MODE' \
+	         -p enable_local_fallback:=$QWEN_VL_ENABLE_LOCAL_FALLBACK \
+	         -p retry_text_without_images:=$QWEN_VL_RETRY_TEXT_WITHOUT_IMAGES \
+	         -p sam_prompt_topic:=/sam3/prompt \
+	         -p language_control_topic:=/vlm_rcm/language_control \
+	         -p publish_sam_prompt_on_instruction:=true \
+	         -p require_post_instruction_candidates:=true \
+	         -p require_scoring_program:=true \
+	         -p min_model_margin:=0.08 \
+	         -p min_expression_margin:=0.05"
+	    fi
+
 }
 
 case "${1:-start}" in
@@ -298,55 +357,9 @@ case "${1:-start}" in
       exit 1
     fi
 
-    start_bg_ros vlm_rcm_port_pose \
-       "${VLM_RCM_POSE_EXECUTABLE:-ros2 run rcm_virtual_fixtures vlm_port_pose_node} --ros-args \
-       -p expected_port_world:='[$VLM_RCM_EXPECTED_X_M,$VLM_RCM_EXPECTED_Y_M,$VLM_RCM_EXPECTED_Z_M]' \
-       -p expected_port_max_distance_m:=0.0 \
-       -p normal_reference:='[0.0,0.0,1.0]' \
-       -p plane_max_tilt_deg:=${VLM_RCM_PLANE_MAX_TILT:-20.0} \
-       -p axis_mode:=$VLM_RCM_AXIS_MODE \
-       -p calibrated_inward_axis:='[0.335067,0.0,-0.942194]' \
-       -p annulus_radius_px:=${VLM_RCM_ANNULUS_RADIUS:-24} \
-       -p hole_search_radius_px:=${VLM_RCM_HOLE_SEARCH_RADIUS:-40} \
-       -p candidate_border_margin_px:=40 \
-       -p min_annulus_valid_fraction:=0.70 \
-       -p min_annulus_plane_inlier_fraction:=${VLM_RCM_PLANE_INLIER_FRACTION:-0.65} \
-       -p hole_min_depth_m:=${VLM_RCM_HOLE_MIN_DEPTH:-0.025} \
-       -p hole_min_area_px:=${VLM_RCM_HOLE_MIN_AREA:-80} \
-	       -p min_mask_area_px:=25 \
-	       -p min_score:=0.03 \
-	       -p language_control_topic:=/vlm_rcm/language_control \
-	       -p require_language_instruction:=true \
-	       -p stable_frames:=3 \
-	       -p stability_window:=5 \
-	       -p max_center_spread_m:=0.006 \
-	       -p max_axis_spread_deg:=6.0 \
-	       -p display_overlay:=$VLM_RCM_DISPLAY_OVERLAY \
-	       -p show_candidates_when_locked:=${VLM_RCM_SHOW_LOCKED_CANDIDATES:-false} \
-	       -p display_scale:=$VLM_RCM_DISPLAY_SCALE"
-
-	    if [[ "$VLM_RCM_START_SEMANTIC_GROUNDER" == "true" ]]; then
-	      start_bg_ros vlm_rcm_port_semantic \
-	        "${VLM_RCM_SEMANTIC_EXECUTABLE:-ros2 run rcm_virtual_fixtures semantic_port_grounder_node} --ros-args \
-	         -p api_base_url:='$QWEN_VL_API_BASE_URL' \
-	         -p api_key:='$QWEN_VL_API_KEY' \
-	         -p api_key_required:=false \
-	         -p model:='$QWEN_VL_MODEL' \
-	         -p temperature:=0.0 \
-	         -p top_p:=1.0 \
-	         -p max_output_tokens:=256 \
-	         -p request_timeout_sec:=90.0 \
-	         -p input_mode:='$QWEN_VL_INPUT_MODE' \
-	         -p enable_local_fallback:=$QWEN_VL_ENABLE_LOCAL_FALLBACK \
-	         -p retry_text_without_images:=$QWEN_VL_RETRY_TEXT_WITHOUT_IMAGES \
-	         -p sam_prompt_topic:=/sam3/prompt \
-	         -p language_control_topic:=/vlm_rcm/language_control \
-	         -p publish_sam_prompt_on_instruction:=true \
-	         -p require_post_instruction_candidates:=true \
-	         -p require_scoring_program:=true \
-	         -p min_model_margin:=0.08 \
-	         -p min_expression_margin:=0.05"
-	    fi
+    if [[ "${VLM_RCM_BASE_ONLY:-false}" != "true" ]]; then
+      start_perception
+    fi
 
 	    start_bg_sam3
 	    startup_complete=true
@@ -373,6 +386,14 @@ case "${1:-start}" in
 	    echo "  ros2 topic echo /vlm_rcm/locked_port_point"
 	    echo "  ros2 topic echo /vlm_rcm/locked_port_axis"
 	    echo "  ros2 topic echo /vlm_rcm/locked_surface_axis"
+    ;;
+  round-start)
+    source_env
+    start_perception
+    ;;
+  round-stop)
+    # Only round-local services. The simulator and SAM3 remain warm.
+    VLM_RCM_STOP_ROUND_ONLY=true stop_all
     ;;
   stop)
     source_env >/dev/null 2>&1 || true
