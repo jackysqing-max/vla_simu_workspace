@@ -15,12 +15,11 @@ setup(
     zip_safe=True,
     maintainer='siqin',
     maintainer_email='siqin@todo.todo',
-    description='Bridge iiwa joint state/torque/desired to RobotState + UDP for monitor',
+    description='Publish robot_control_msgs/RobotState from iiwa control topics',
     license='Apache-2.0',
     entry_points={
         'console_scripts': [
             'robotstate_bridge = iiwa_state_udp_bridge.robotstate_bridge:main',
-            'bridge_node = iiwa_state_udp_bridge.bridge_node:main',
         ],
     },
 )

@@ -1,0 +1,137 @@
+<?xml version="1.0"?>
+<robot name="dvrk_large_needle_driver_420006_tip">
+  <!--
+    Visual-only distal assembly derived from jhu-dvrk/dvrk_model.
+    Collision geometry is intentionally omitted: the KUKA demo uses this model
+    to show the surgical wrist and jaws while retaining its existing kinematics.
+  -->
+  <material name="instrument_silver">
+    <color rgba="0.79 0.82 0.93 1.0"/>
+  </material>
+  <material name="jaw_steel">
+    <color rgba="0.78 0.76 0.74 1.0"/>
+  </material>
+
+  <link name="tool_wrist_link">
+    <inertial>
+      <origin xyz="0 0 0.0036169" rpy="0 0 0"/>
+      <mass value="0.00036792"/>
+      <inertia ixx="4.0122e-9" ixy="1.7277e-12" ixz="-9.3294e-14"
+               iyy="3.5889e-9" iyz="2.5109e-13" izz="3.3782e-9"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="../meshes/dvrk_lnd_420006/tool_wrist_link.STL"/>
+      </geometry>
+      <material name="instrument_silver"/>
+    </visual>
+  </link>
+
+  <link name="tool_wrist_shaft_link">
+    <inertial>
+      <origin xyz="0 0 -0.0000040735" rpy="0 0 0"/>
+      <mass value="0.000049567"/>
+      <inertia ixx="2.1561e-10" ixy="1.9482e-12" ixz="0"
+               iyy="5.9138e-11" iyz="0" izz="2.1706e-10"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="../meshes/dvrk_lnd_420006/tool_wrist_shaft_link.STL"/>
+      </geometry>
+      <material name="instrument_silver"/>
+    </visual>
+  </link>
+  <joint name="outer_roll_shaft" type="fixed">
+    <origin xyz="0 0.00001 0.009" rpy="0 0 0"/>
+    <parent link="tool_wrist_link"/>
+    <child link="tool_wrist_shaft_link"/>
+  </joint>
+
+  <link name="tool_wrist_scal_link">
+    <inertial>
+      <origin xyz="0 0 0.003884" rpy="0 0 0"/>
+      <mass value="0.00016398"/>
+      <inertia ixx="1.4976e-9" ixy="-9.1973e-12" ixz="-3.4692e-14"
+               iyy="1.8154e-9" iyz="-8.7938e-14" izz="9.1518e-10"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="../meshes/dvrk_lnd_420006/tool_wrist_scal_link.STL"/>
+      </geometry>
+      <material name="instrument_silver"/>
+    </visual>
+  </link>
+  <joint name="wrist_pitch" type="revolute">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <parent link="tool_wrist_shaft_link"/>
+    <child link="tool_wrist_scal_link"/>
+    <axis xyz="0 -1 0"/>
+    <limit lower="-1.39626" upper="1.39626" effort="1" velocity="1"/>
+  </joint>
+
+  <link name="tool_wrist_sca_shaft_link">
+    <inertial>
+      <origin xyz="0 0 0.0000027348" rpy="0 0 0"/>
+      <mass value="0.000010603"/>
+      <inertia ixx="2.9821e-12" ixy="0" ixz="0"
+               iyy="3.33e-11" iyz="0" izz="3.33e-11"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="../meshes/dvrk_lnd_420006/tool_wrist_sca_shaft_link.STL"/>
+      </geometry>
+      <material name="instrument_silver"/>
+    </visual>
+  </link>
+  <joint name="wrist_yaw" type="revolute">
+    <origin xyz="0 0 0.0086973" rpy="0 0 0"/>
+    <parent link="tool_wrist_scal_link"/>
+    <child link="tool_wrist_sca_shaft_link"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-1.39626" upper="1.39626" effort="1" velocity="1"/>
+  </joint>
+
+  <link name="tool_wrist_sca_ee_link_1">
+    <inertial>
+      <origin xyz="0.00068905 -0.00017079 0.001575" rpy="0 0 0"/>
+      <mass value="0.0002713"/>
+      <inertia ixx="2.1945e-9" ixy="-1.9034e-11" ixz="2.4279e-10"
+               iyy="2.0419e-9" iyz="1.3672e-10" izz="4.0152e-10"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="../meshes/dvrk_lnd_420006/tool_wrist_sca_ee_link_1.STL"/>
+      </geometry>
+      <material name="jaw_steel"/>
+    </visual>
+  </link>
+  <joint name="jaw_1" type="revolute">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <parent link="tool_wrist_sca_shaft_link"/>
+    <child link="tool_wrist_sca_ee_link_1"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-1.5707" upper="1.5707" effort="1" velocity="1"/>
+  </joint>
+
+  <link name="tool_wrist_sca_ee_link_2">
+    <inertial>
+      <origin xyz="-0.00068905 0.00017079 0.001575" rpy="0 0 0"/>
+      <mass value="0.0002713"/>
+      <inertia ixx="2.1945e-9" ixy="-1.9034e-11" ixz="-2.4279e-10"
+               iyy="2.0419e-9" iyz="-1.3672e-10" izz="4.0152e-10"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="../meshes/dvrk_lnd_420006/tool_wrist_sca_ee_link_2.STL"/>
+      </geometry>
+      <material name="jaw_steel"/>
+    </visual>
+  </link>
+  <joint name="jaw_2" type="revolute">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <parent link="tool_wrist_sca_shaft_link"/>
+    <child link="tool_wrist_sca_ee_link_2"/>
+    <axis xyz="-1 0 0"/>
+    <limit lower="-1.5707" upper="1.5707" effort="1" velocity="1"/>
+  </joint>
+</robot>

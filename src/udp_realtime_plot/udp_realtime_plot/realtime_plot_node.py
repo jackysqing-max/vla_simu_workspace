@@ -11,9 +11,7 @@ import pyqtgraph as pg
 
 
 class RealtimePlotNode(Node):
-    """
-    Subscribe Float32MultiArray and plot selected indices in real-time using pyqtgraph.
-    """
+    """Plot selected Float32MultiArray indices in real time with pyqtgraph."""
 
     def __init__(self):
         super().__init__('realtime_plot_node')
@@ -23,13 +21,17 @@ class RealtimePlotNode(Node):
         self.declare_parameter('window', 1000)     # samples kept
 
         self.topic = self.get_parameter('topic').get_parameter_value().string_value
-        self.indices = list(self.get_parameter('indices').get_parameter_value().integer_array_value)
+        self.indices = list(
+            self.get_parameter('indices').get_parameter_value().integer_array_value
+        )
         self.window = int(self.get_parameter('window').get_parameter_value().integer_value)
 
         self.sub = self.create_subscription(Float32MultiArray, self.topic, self.on_msg, 50)
 
         # ring buffers
-        self.buffers: List[Deque[float]] = [collections.deque(maxlen=self.window) for _ in self.indices]
+        self.buffers: List[Deque[float]] = [
+            collections.deque(maxlen=self.window) for _ in self.indices
+        ]
         self.x: Deque[int] = collections.deque(maxlen=self.window)
         self.counter = 0
 
@@ -52,7 +54,10 @@ class RealtimePlotNode(Node):
         self.qt_timer.timeout.connect(self.refresh_plot)
         self.qt_timer.start(30)  # ~33 Hz UI refresh
 
-        self.get_logger().info(f"Plotter started. topic={self.topic}, indices={self.indices}, window={self.window}")
+        self.get_logger().info(
+            f"Plotter started. topic={self.topic}, indices={self.indices}, "
+            f"window={self.window}"
+        )
 
     def on_msg(self, msg: Float32MultiArray):
         data = list(msg.data)

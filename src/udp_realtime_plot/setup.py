@@ -24,8 +24,8 @@ setup(
     },
     entry_points={
         'console_scripts': [
-        'udp_receiver = udp_realtime_plot.udp_receiver_node:main',
-        'udp_plotter = udp_realtime_plot.realtime_plot_node:main',
+            'udp_receiver = udp_realtime_plot.udp_receiver_node:main',
+            'udp_plotter = udp_realtime_plot.realtime_plot_node:main',
         ],
     },
 )

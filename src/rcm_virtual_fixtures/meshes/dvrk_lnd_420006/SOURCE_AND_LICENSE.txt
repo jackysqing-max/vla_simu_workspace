@@ -1,0 +1,13 @@
+Model: da Vinci Research Kit Large Needle Driver, instrument 420006
+Source repository: https://github.com/jhu-dvrk/dvrk_model
+Source revision: 1744e52cedc33a750016f1a5a919e8129140bc21
+Original mesh directory: meshes/instruments/420006
+Retrieved: 2026-06-29
+
+The copied STL files retain the upstream MIT License. The full upstream
+license text is stored beside this file as LICENSE.dvrk_model.txt.
+
+The local URDF is a visual-only assembly of the upstream distal wrist and jaw
+meshes. Its joint origins and axes follow urdf/Si/psm_tool.urdf.xacro from the
+same source revision. It is not a validated dynamics or collision model and
+must not be used as a medical-device controller.

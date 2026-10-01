@@ -1,0 +1,14 @@
+llm_task_planner_node:
+  ros__parameters:
+    api_protocol: "chat_completions"
+    api_base_url: "http://127.0.0.1:8000/v1/chat/completions"
+    api_key: "EMPTY"
+    api_key_env_var: ""
+    api_key_required: false
+    model: "Qwen/Qwen3-4B"
+    reasoning_effort: ""
+    temperature: 0.7
+    top_p: 0.8
+    max_output_tokens: 512
+    request_timeout_sec: 90.0
+    extra_request_body_json: '{"top_k": 20, "chat_template_kwargs": {"enable_thinking": false}}'
