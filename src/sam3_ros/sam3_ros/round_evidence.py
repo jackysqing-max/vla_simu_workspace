@@ -1,6 +1,7 @@
 """Opt-in, round-fenced SAM evidence. Unconfigured legacy runs are unchanged."""
 import json
 import os
+import time
 from pathlib import Path
 import numpy as np
 from PIL import Image
@@ -34,11 +35,14 @@ def save_inference(round_info, header, rgb, resized, masks, scores, indices,
     Image.fromarray(rgb).save(path / 'source_rgb.png')
     Image.fromarray(resized).save(path / 'model_input_rgb.png')
     Image.fromarray(union).save(path / 'published_union_mask.png')
+    storage_masks, original_dtype = compact_masks(masks)
     np.savez_compressed(path / 'instance_masks_and_scores.npz',
-                        masks=masks, scores=scores, kept_indices=indices)
+                        masks=storage_masks, scores=scores, kept_indices=indices)
     (path / 'inference.json').write_text(json.dumps({
         'round_id': round_info['round_id'], 'stamp_ns': stamp,
         'frame_id': header.frame_id, 'prompt': prompt,
+        'mask_original_dtype': original_dtype, 'mask_storage_dtype': str(storage_masks.dtype),
+        'mask_storage_lossless': True, 'evidence_write_sec': time.time()-end,
         'model': 'facebook/sam3', 'start_wall_sec': start, 'end_wall_sec': end,
         'inference_and_postprocess_sec': end-start,
         'raw_instance_count': len(scores), 'kept_indices': indices.tolist(),
@@ -62,3 +66,15 @@ def mark_busy(info):
         tmp.replace(path)
     else:
         path.unlink(missing_ok=True)
+
+
+def compact_masks(masks):
+    """Losslessly pack binary postprocessed masks, retaining their source dtype.
+
+    SAM3 returns 0/1 int64 masks here. Storing those as bool removes 8x I/O
+    work without changing any mask value. Unexpected numeric masks stay intact.
+    """
+    source = np.asarray(masks)
+    if source.dtype.kind in 'biu' and np.all((source == 0) | (source == 1)):
+        return source.astype(np.bool_, copy=False), str(source.dtype)
+    return source, str(source.dtype)
